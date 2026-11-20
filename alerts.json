@@ -16,7 +16,7 @@
   {
    "name": "Modelo deseado",
    "models": "u3223qe|p3223qe|p3421w|u3419w|u3423we|34wn80c|34wq75c|35wn75c|s34a650|s65u|c34h890|ch890|c34j791|cj791|346e2c|u34v5c|cu34p2c|s34c65|34wq650",
-   "max_price": 150,
+   "max_price": 100,
    "no_damage": true
   },
   {
@@ -26,7 +26,7 @@
     "5K2K"
    ],
    "usbc_charge": true,
-   "max_price": 130,
+   "max_price": 110,
    "no_damage": true
   },
   {
@@ -35,14 +35,14 @@
     "UWQHD"
    ],
    "min_inch": 33.5,
-   "max_price": 150,
+   "max_price": 100,
    "no_damage": true
   },
   {
    "name": "Ultrawide sin modelo, barato",
    "any": "ultra ?-?wide|\\b34 ?(inch|\"|”|duim)|3440|21:9|\\b35 ?(inch|\"|”)",
    "none": "29 ?(inch|\"|”)|2560 ?x ?1080|uwfhd",
-   "max_price": 100,
+   "max_price": 70,
    "no_damage": true,
    "not_res": [
     "UWFHD"
@@ -56,7 +56,7 @@
    ],
    "min_inch": 31,
    "max_inch": 32.5,
-   "max_price": 110,
+   "max_price": 80,
    "no_damage": true
   },
   {
@@ -66,14 +66,14 @@
    ],
    "min_inch": 31,
    "max_inch": 32.5,
-   "max_price": 60,
+   "max_price": 50,
    "no_damage": true
   },
   {
-   "name": "Chollo (≥28\", −70 %)",
+   "name": "Chollo (≥28\", −75 %)",
    "min_inch": 28,
-   "min_discount": 70,
-   "max_price": 150,
+   "min_discount": 75,
+   "max_price": 120,
    "no_damage": true,
    "not_res": [
     "UWFHD"
