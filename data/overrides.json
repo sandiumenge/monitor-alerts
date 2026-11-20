@@ -1,0 +1,66 @@
+{
+ "m2467632034": {
+  "re": "34wr50qc",
+  "name": "LG 34WR50QC",
+  "inch": 34,
+  "res": "UWQHD 100Hz",
+  "new": 280,
+  "disc": true,
+  "usbc": "no",
+  "notes": "Zo goed als nieuw, con bon de 2 años; sin cables ni caja indicados. El anuncio dice 4K pero es 3440x1440. Descatalogado; precio último conocido en NL 353 EUR."
+ },
+ "m2467620060": {
+  "re": "xub3493wqsu",
+  "name": "Iiyama XUB3493WQSU-B1",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 330,
+  "disc": true,
+  "usbc": "no",
+  "notes": "Casi nuevo, poco uso y funciona perfecto; sin cables ni embalaje indicados. Solo DisplayPort en atributos. Descatalogado; precio último conocido 418,95 EUR."
+ },
+ "m2467552195": {
+  "name": "MSI Gaming 32 inch (modelo no indicado)",
+  "inch": 32,
+  "disc": false,
+  "usbc": "no",
+  "notes": "Zo goed als nieuw, uitstekende staat; sin modelo ni accesorios indicados. Conexiones DVI, HDMI y DisplayPort. Preguntar modelo al vendedor."
+ },
+ "m2467702102": {
+  "name": "Acer (modelo no indicado)",
+  "disc": false,
+  "usbc": "no",
+  "notes": "Zo goed als nieuw, funciona bien; incluye cable HDMI. Sin modelo ni tamano indicados, solo 60 Hz o menos. Recogida en Amsterdam."
+ },
+ "m2439278271": {
+  "name": "MSI Optix G27CQ4 (inferido)",
+  "inch": 27,
+  "res": "WQHD 165Hz",
+  "disc": true,
+  "usbc": "no",
+  "notes": "Zo goed als nieuw, fabricado nov 2020, 165Hz 1ms curvo. Modelo inferido sin confirmar. Descripcion: solo HDMI y DP, aunque el atributo menciona USB-C."
+ },
+ "m2467743113": {
+  "name": "Raider (modelo no indicado)",
+  "disc": false,
+  "usbc": "no",
+  "notes": "Zo goed als nieuw, en excelente estado; sin especificaciones, modelo ni accesorios indicados. Envio o recogida, 140 EUR."
+ },
+ "m2467653148": {
+  "re": "227e6edsd",
+  "name": "Philips 227E6EDSD + Logitech MK120",
+  "inch": 21.5,
+  "res": "FHD 60Hz",
+  "disc": true,
+  "usbc": "no",
+  "notes": "Usado; incluye monitor, teclado y raton Logitech MK120. Panel IPS segun anuncio. Sin precio NL actual confirmado."
+ },
+ "m2467648383": {
+  "name": "LG UltraGear 27GL650F (inferido)",
+  "inch": 27,
+  "res": "FHD 165Hz",
+  "disc": true,
+  "usbc": "no",
+  "notes": "Zo goed als nieuw, IPS 1080p 1ms, inclinable; vendedor pasa a un 240 Hz. Modelo inferido sin confirmar; Coolblue lo muestra como descatalogado."
+ }
+}

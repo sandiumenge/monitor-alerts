@@ -1,0 +1,32 @@
+{
+ "min_inch": 28,
+ "max_inch": 49,
+ "max_price": 200,
+ "radius_km": 25,
+ "centers": {
+  "Amsterdam": "1012AB",
+  "Utrecht": "3511AA"
+ },
+ "mp_queries": [
+  "monitor",
+  "beeldscherm",
+  "ultrawide",
+  "curved monitor"
+ ],
+ "mp_delay_s": 1.2,
+ "fb_queries": [
+  "monitor",
+  "beeldscherm",
+  "ultrawide",
+  "curved monitor",
+  "monitor 32",
+  "scherm"
+ ],
+ "fb_days": 7,
+ "local_towns": "Amsterdam|Amstelveen|Diemen|Duivendrecht|Zaandam|Zaan.*|Krommenie|Assendelft|Westzaan|Purmerend|Monnickendam|Volendam|Edam|Landsmeer|Oostzaan|Wormer|Badhoevedorp|Hoofddorp|Nieuw-Vennep|Haarlem|Heemstede|Aalsmeer|Uithoorn|Weesp|Muiden|Muiderberg|Almere.*|Huizen|Bussum|Naarden|Hilversum|Laren|Blaricum|Abcoude|Mijdrecht|Vinkeveen|Wilnis|Halfweg|Zwanenburg|Velsen.*|IJmuiden|Santpoort.*|Bloemendaal|Overveen|Heemskerk|Beverwijk|Lijnden|Rijsenhout|Kudelstaart|De Kwakel|Ouderkerk aan de Amstel|Breukelen|Loenen.*|Utrecht|Nieuwegein|Houten|Zeist|De Bilt|Bilthoven|Maarssen|IJsselstein|Vianen|Bunnik|Driebergen.*|Doorn|Soest|Soesterberg|Den Dolder|Woerden|Montfoort|Harmelen|De Meern|Vleuten|Amersfoort|Leusden|Baarn|Maartensdijk|Culemborg|Wijk bij Duurstede|Lopik|Oudewater|Eemnes|Hoevelaken|Zwaanshoek|Cruquius|Vijfhuizen|Hoogland|Hooglanderveen|Nederhorst den Berg|Ankeveen|Kortenhoef|Loosdrecht|Hoofddorp|Schiphol",
+ "mp_extra_queries": [
+  "ultrawide",
+  "34 inch",
+  "21:9"
+ ]
+}

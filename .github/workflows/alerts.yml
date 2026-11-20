@@ -1,0 +1,32 @@
+name: monitor-alerts
+on:
+  schedule:
+    - cron: "*/20 6-23 * * *"   # every 20 min, 07:00-00:40 Amsterdam (winter); ~1,600 Actions minutes/month
+  workflow_dispatch:
+concurrency:
+  group: alerts
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TZ: Europe/Amsterdam
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore notified-listings state
+        uses: actions/cache/restore@v4
+        with:
+          path: data/alert_state.json
+          key: alert-state-${{ github.run_id }}
+          restore-keys: alert-state-
+      - name: Check Marktplaats and push matches
+        run: python3 -I alert.py run --cloud
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/alert_state.json
+          key: alert-state-${{ github.run_id }}

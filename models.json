@@ -1,0 +1,880 @@
+[
+ {
+  "re": "u3223qe",
+  "name": "Dell U3223QE",
+  "inch": 31.5,
+  "res": "4K",
+  "new": 700,
+  "usbc": "90W",
+  "panel": "IPS",
+  "hz": 60
+ },
+ {
+  "re": "p3223qe",
+  "name": "Dell P3223QE",
+  "inch": 31.5,
+  "res": "4K",
+  "new": 550,
+  "usbc": "65W"
+ },
+ {
+  "re": "p3223de",
+  "name": "Dell P3223DE",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 500,
+  "usbc": "65W"
+ },
+ {
+  "re": "p3221d",
+  "name": "Dell P3221D",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 450,
+  "disc": true,
+  "usbc": "65W"
+ },
+ {
+  "re": "p3421w",
+  "name": "Dell P3421W",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 450,
+  "disc": true,
+  "usbc": "65W",
+  "panel": "IPS",
+  "hz": 60
+ },
+ {
+  "re": "u3419w",
+  "name": "Dell U3419W",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 600,
+  "disc": true,
+  "usbc": "90W",
+  "panel": "IPS",
+  "hz": 60
+ },
+ {
+  "re": "u3415w",
+  "name": "Dell U3415W",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 400,
+  "disc": true,
+  "usbc": "no",
+  "panel": "IPS",
+  "hz": 60
+ },
+ {
+  "re": "u3011",
+  "name": "Dell U3011",
+  "inch": 30,
+  "res": "WQXGA",
+  "new": 200,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "346e2c",
+  "name": "Philips 346E2CUAE",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 249,
+  "usbc": "65W",
+  "panel": "VA",
+  "hz": 100
+ },
+ {
+  "re": "326p1h",
+  "name": "Philips 326P1H",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 450,
+  "usbc": "65W"
+ },
+ {
+  "re": "325e",
+  "name": "Philips 325E",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 215,
+  "usbc": "no"
+ },
+ {
+  "re": "345b1c",
+  "name": "Philips 345B1C",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 300,
+  "usbc": "no",
+  "panel": "VA",
+  "hz": 100
+ },
+ {
+  "re": "288p6",
+  "name": "Philips 288P6L",
+  "inch": 28,
+  "res": "4K",
+  "new": 230,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "32m1c5200",
+  "name": "Philips Evnia 32M1C5200W",
+  "inch": 31.5,
+  "res": "FHD",
+  "new": 210,
+  "usbc": "no"
+ },
+ {
+  "re": "smart monitor m7|\\bm7\\b.*32|ls32[a-z]m70|s32[a-z]m70",
+  "name": "Samsung Smart Monitor M7 32\"",
+  "inch": 32,
+  "res": "4K",
+  "new": 350,
+  "usbc": "65W",
+  "panel": "VA",
+  "hz": 60
+ },
+ {
+  "re": "s34a650|s65u",
+  "name": "Samsung S65U / S34A650",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 450,
+  "usbc": "90W",
+  "panel": "VA",
+  "hz": 100
+ },
+ {
+  "re": "c34h890|ch890",
+  "name": "Samsung C34H890",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 400,
+  "disc": true,
+  "usbc": "65W",
+  "panel": "VA",
+  "hz": 100
+ },
+ {
+  "re": "c34j791|cj791",
+  "name": "Samsung C34J791 / CJ791",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 400,
+  "disc": true,
+  "usbc": "85W TB3",
+  "panel": "VA",
+  "hz": 100
+ },
+ {
+  "re": "odyssey oled g8|g85sb|s34bg85",
+  "name": "Samsung Odyssey OLED G8 34\"",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 700,
+  "usbc": "65W",
+  "panel": "OLED",
+  "hz": 175
+ },
+ {
+  "re": "u32r59|ur59",
+  "name": "Samsung U32R590",
+  "inch": 31.5,
+  "res": "4K",
+  "new": 320,
+  "usbc": "no"
+ },
+ {
+  "re": "u32j59|uj59",
+  "name": "Samsung U32J590",
+  "inch": 31.5,
+  "res": "4K",
+  "new": 300,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "c34g5|s34cg5|odyssey g5.{0,40}\\b34|\\b34.{0,25}odyssey g5",
+  "name": "Samsung Odyssey G5 34\" (C34G55T)",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 240,
+  "usbc": "no",
+  "panel": "VA",
+  "hz": 165
+ },
+ {
+  "re": "odyssey g5.*32|s32ag5|c32g5|s32cg5",
+  "name": "Samsung Odyssey G5 32\"",
+  "inch": 32,
+  "res": "QHD",
+  "new": 265,
+  "usbc": "no"
+ },
+ {
+  "re": "u28r55|ur55|u28e590|u28e570|u28h750",
+  "name": "Samsung U28 4K (UR55/E590)",
+  "inch": 28,
+  "res": "4K",
+  "new": 230,
+  "usbc": "no"
+ },
+ {
+  "re": "cjg5|c32jg5|lc32jg5",
+  "name": "Samsung CJG5x 32\" (C32JG5x)",
+  "inch": 31.5,
+  "res": "QHD 144Hz",
+  "new": 230,
+  "disc": true,
+  "usbc": "no",
+  "panel": "VA",
+  "hz": 144
+ },
+ {
+  "re": "c32r50|cr50",
+  "name": "Samsung C32R502",
+  "inch": 31.5,
+  "res": "FHD",
+  "new": 170,
+  "usbc": "no"
+ },
+ {
+  "re": "c32f39|cf39.*32",
+  "name": "Samsung C32F391",
+  "inch": 31.5,
+  "res": "FHD",
+  "new": 160,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "c32hg70|chg70",
+  "name": "Samsung C32HG70",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 350,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "32ul750",
+  "name": "LG 32UL750",
+  "inch": 31.5,
+  "res": "4K",
+  "new": 440,
+  "usbc": "60W"
+ },
+ {
+  "re": "32un650|32un550|32un500",
+  "name": "LG 32UN 4K",
+  "inch": 31.5,
+  "res": "4K",
+  "new": 300,
+  "usbc": "no"
+ },
+ {
+  "re": "32sr50f",
+  "name": "LG MyView 32SR50F",
+  "inch": 31.5,
+  "res": "FHD",
+  "new": 220,
+  "usbc": "no"
+ },
+ {
+  "re": "34um88|34wl750|34uc87",
+  "name": "LG 34\" ultrawide QHD (UM88/WL750/UC87)",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 300,
+  "disc": true,
+  "usbc": "no",
+  "panel": "IPS",
+  "hz": 60
+ },
+ {
+  "re": "34wn80c|34wk95u|34wq75c",
+  "name": "LG 34\" ultrawide USB-C (WN80C/WQ75C)",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 450,
+  "usbc": "60W+",
+  "panel": "IPS",
+  "hz": 60
+ },
+ {
+  "re": "34wp500",
+  "name": "LG 34WP500",
+  "inch": 34,
+  "res": "UWFHD",
+  "new": 229,
+  "usbc": "no",
+  "panel": "IPS",
+  "hz": 75
+ },
+ {
+  "re": "34um69g|34wl500|34um59|34um58",
+  "name": "LG 34\" ultrawide FHD (UM69G/WL500)",
+  "inch": 34,
+  "res": "UWFHD",
+  "new": 220,
+  "disc": true,
+  "usbc": "video",
+  "panel": "IPS",
+  "hz": 75
+ },
+ {
+  "re": "34u511",
+  "name": "LG 34U511A",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 220,
+  "usbc": "no"
+ },
+ {
+  "re": "32gn650|32gn600",
+  "name": "LG 32GN650",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 250,
+  "usbc": "no"
+ },
+ {
+  "re": "32gn550|32gn500",
+  "name": "LG 32GN550",
+  "inch": 31.5,
+  "res": "FHD",
+  "new": 230,
+  "usbc": "no"
+ },
+ {
+  "re": "29wp500|29wp60g",
+  "name": "LG 29WP500",
+  "inch": 29,
+  "res": "UWFHD",
+  "new": 200,
+  "usbc": "no",
+  "panel": "IPS",
+  "hz": 75
+ },
+ {
+  "re": "29wl500|29um58|29um59|29um69|29wk500|29wk600",
+  "name": "LG 29\" ultrawide FHD",
+  "inch": 29,
+  "res": "UWFHD",
+  "new": 180,
+  "disc": true,
+  "usbc": "no",
+  "panel": "IPS",
+  "hz": 75
+ },
+ {
+  "re": "pa34vc",
+  "name": "ASUS ProArt PA34VCNV",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 550,
+  "usbc": "90W",
+  "panel": "IPS",
+  "hz": 100
+ },
+ {
+  "re": "vp32uq",
+  "name": "ASUS VP32UQ",
+  "inch": 31.5,
+  "res": "4K",
+  "new": 350,
+  "usbc": "no"
+ },
+ {
+  "re": "xg32vq",
+  "name": "ASUS XG32VQ",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 300,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "pb287q|pb277",
+  "name": "ASUS PB287Q",
+  "inch": 28,
+  "res": "4K",
+  "new": 240,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "p40w",
+  "name": "Lenovo ThinkVision P40w-20",
+  "inch": 40,
+  "res": "5K2K",
+  "new": 1400,
+  "usbc": "100W TB4",
+  "panel": "IPS",
+  "hz": 75
+ },
+ {
+  "re": "s340c",
+  "name": "HP S340c",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 400,
+  "disc": true,
+  "usbc": "60W"
+ },
+ {
+  "re": "e344c",
+  "name": "HP E344c",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 450,
+  "disc": true,
+  "usbc": "65W",
+  "panel": "VA",
+  "hz": 60
+ },
+ {
+  "re": "hp 32s|\\b32s\\b",
+  "name": "HP 32s",
+  "inch": 31.5,
+  "res": "FHD",
+  "new": 190,
+  "usbc": "no"
+ },
+ {
+  "re": "ps341wu",
+  "name": "MSI Prestige PS341WU",
+  "inch": 34,
+  "res": "5K2K",
+  "new": 1050,
+  "usbc": "video",
+  "panel": "IPS",
+  "hz": 60
+ },
+ {
+  "re": "mp341cq",
+  "name": "MSI MP341CQ",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 220,
+  "usbc": "no",
+  "panel": "VA",
+  "hz": 100
+ },
+ {
+  "re": "mag ?321qr",
+  "name": "MSI MAG321QR",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 280,
+  "disc": true,
+  "usbc": "video"
+ },
+ {
+  "re": "mag ?322cqr",
+  "name": "MSI MAG322CQR",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 300,
+  "disc": true,
+  "usbc": "video"
+ },
+ {
+  "re": "mag ?321cup",
+  "name": "MSI MAG 321CUP(DF)",
+  "inch": 31.5,
+  "res": "4K",
+  "new": 350,
+  "usbc": "video"
+ },
+ {
+  "re": "x3272uhs",
+  "name": "iiyama X3272UHS",
+  "inch": 31.5,
+  "res": "4K",
+  "new": 330,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "xb3288uhsu",
+  "name": "iiyama XB3288UHSU",
+  "inch": 31.5,
+  "res": "4K",
+  "new": 220,
+  "usbc": "no"
+ },
+ {
+  "re": "gb3461wqsu",
+  "name": "iiyama GB3461WQSU",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 330,
+  "disc": true,
+  "usbc": "no",
+  "panel": "IPS",
+  "hz": 144
+ },
+ {
+  "re": "gcb3480wqsu",
+  "name": "iiyama GCB3480WQSU",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 330,
+  "usbc": "no",
+  "panel": "VA",
+  "hz": 165
+ },
+ {
+  "re": "xub3294qsu",
+  "name": "iiyama XUB3294QSU",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 250,
+  "usbc": "no"
+ },
+ {
+  "re": "g32qc ?a",
+  "name": "Gigabyte G32QC A",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 260,
+  "usbc": "no"
+ },
+ {
+  "re": "g32qc",
+  "name": "Gigabyte G32QC",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 270,
+  "usbc": "no"
+ },
+ {
+  "re": "q3279vwf",
+  "name": "AOC Q3279VWF",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 200,
+  "usbc": "no"
+ },
+ {
+  "re": "cq32g4",
+  "name": "AOC CQ32G4VE",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 230,
+  "usbc": "no"
+ },
+ {
+  "re": "cq32g1",
+  "name": "AOC CQ32G1",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 230,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "32g1wg4|32g2wg8|c32g1|c32g2",
+  "name": "AOC C32G 32\" FHD",
+  "inch": 31.5,
+  "res": "FHD",
+  "new": 190,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "cu34g4|cu34g2",
+  "name": "AOC CU34G",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 240,
+  "usbc": "no",
+  "panel": "VA",
+  "hz": 144
+ },
+ {
+  "re": "ag35[12]ucg",
+  "name": "AOC AGON AG352UCG",
+  "inch": 35,
+  "res": "UWQHD",
+  "new": 350,
+  "disc": true,
+  "usbc": "no",
+  "panel": "VA",
+  "hz": 100
+ },
+ {
+  "re": "z35p",
+  "name": "Acer Predator Z35P",
+  "inch": 35,
+  "res": "UWQHD",
+  "new": 300,
+  "disc": true,
+  "usbc": "no",
+  "panel": "VA",
+  "hz": 100
+ },
+ {
+  "re": "xv320qu",
+  "name": "Acer XV320QU",
+  "inch": 31.5,
+  "res": "QHD",
+  "new": 230,
+  "usbc": "no"
+ },
+ {
+  "re": "kg281k",
+  "name": "Acer KG281K",
+  "inch": 28,
+  "res": "4K",
+  "new": 230,
+  "usbc": "no"
+ },
+ {
+  "re": "ug30",
+  "name": "Z-Edge UG30",
+  "inch": 30,
+  "res": "UWFHD",
+  "new": 200,
+  "usbc": "no",
+  "panel": "VA",
+  "hz": 200
+ },
+ {
+  "re": "34wr50qc",
+  "name": "LG 34WR50QC",
+  "inch": 34,
+  "res": "UWQHD 100Hz",
+  "new": 280,
+  "disc": true,
+  "usbc": "no",
+  "notes": "Zo goed als nieuw, con bon de 2 años; sin cables ni caja indicados. El anuncio dice 4K pero es 3440x1440. Descatalogado; precio último conocido en NL 353 EUR.",
+  "panel": "VA",
+  "hz": 100
+ },
+ {
+  "re": "xub3493wqsu",
+  "name": "Iiyama XUB3493WQSU-B1",
+  "inch": 34,
+  "res": "UWQHD",
+  "new": 330,
+  "disc": true,
+  "usbc": "no",
+  "notes": "Casi nuevo, poco uso y funciona perfecto; sin cables ni embalaje indicados. Solo DisplayPort en atributos. Descatalogado; precio último conocido 418,95 EUR.",
+  "panel": "IPS",
+  "hz": 75
+ },
+ {
+  "re": "227e6edsd",
+  "name": "Philips 227E6EDSD + Logitech MK120",
+  "inch": 21.5,
+  "res": "FHD 60Hz",
+  "disc": true,
+  "usbc": "no",
+  "notes": "Usado; incluye monitor, teclado y raton Logitech MK120. Panel IPS segun anuncio. Sin precio NL actual confirmado."
+ },
+ {
+  "re": "34uc99",
+  "name": "LG 34UC99-W",
+  "inch": 34,
+  "res": "UWQHD",
+  "panel": "IPS",
+  "hz": 75,
+  "new": 450,
+  "disc": true,
+  "usbc": null
+ },
+ {
+  "re": "34wn780",
+  "name": "LG 34WN780 (pie Ergo)",
+  "inch": 34,
+  "res": "UWQHD",
+  "panel": "IPS",
+  "hz": 75,
+  "new": 400,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "34wl850",
+  "name": "LG 34WL850-W",
+  "inch": 34,
+  "res": "UWQHD",
+  "panel": "IPS",
+  "hz": 75,
+  "new": 600,
+  "disc": true,
+  "usbc": null
+ },
+ {
+  "re": "35wn75c",
+  "name": "LG 35WN75C-B",
+  "inch": 35,
+  "res": "UWQHD",
+  "panel": "VA",
+  "hz": 100,
+  "new": 400,
+  "disc": true,
+  "usbc": "94W"
+ },
+ {
+  "re": "35wn73a|35wn65c",
+  "name": "LG 35WN73A / 35WN65C",
+  "inch": 35,
+  "res": "UWQHD",
+  "panel": "VA",
+  "hz": 100,
+  "new": 350,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "34wq650",
+  "name": "LG 34WQ650-W",
+  "inch": 34,
+  "res": "UWFHD",
+  "panel": "IPS",
+  "hz": 100,
+  "new": 300,
+  "disc": false,
+  "usbc": "65W"
+ },
+ {
+  "re": "34wq500|34wq60c",
+  "name": "LG 34WQ500/60C",
+  "inch": 34,
+  "res": "UWFHD",
+  "panel": "IPS",
+  "hz": 100,
+  "new": 250,
+  "disc": false,
+  "usbc": null
+ },
+ {
+  "re": "u34v5c",
+  "name": "AOC U34V5C",
+  "inch": 34,
+  "res": "UWQHD",
+  "panel": "VA",
+  "hz": 100,
+  "new": 320,
+  "disc": false,
+  "usbc": "65W"
+ },
+ {
+  "re": "cu34p2c",
+  "name": "AOC CU34P2C",
+  "inch": 34,
+  "res": "UWQHD",
+  "panel": "VA",
+  "hz": 100,
+  "new": 350,
+  "disc": true,
+  "usbc": "65W"
+ },
+ {
+  "re": "cq34g2|cu34v5c",
+  "name": "AOC CQ34G2 / CU34V5C",
+  "inch": 34,
+  "res": "UWQHD",
+  "panel": "VA",
+  "hz": 165,
+  "new": 280,
+  "disc": false,
+  "usbc": null
+ },
+ {
+  "re": "m34wq",
+  "name": "Gigabyte M34WQ",
+  "inch": 34,
+  "res": "UWQHD",
+  "panel": "IPS",
+  "hz": 144,
+  "new": 400,
+  "disc": true,
+  "usbc": "video"
+ },
+ {
+  "re": "vg34vq",
+  "name": "ASUS TUF VG34VQ",
+  "inch": 34,
+  "res": "UWQHD",
+  "panel": "VA",
+  "hz": 165,
+  "new": 350,
+  "disc": false,
+  "usbc": "no"
+ },
+ {
+  "re": "c49hg90|c4hg90|49hg90",
+  "name": "Samsung C49HG90 49\" (32:9)",
+  "inch": 49,
+  "res": "DFHD 32:9",
+  "panel": "VA",
+  "hz": 144,
+  "new": 700,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "predator z35\\b(?!p)",
+  "name": "Acer Predator Z35 (2560x1080)",
+  "inch": 35,
+  "res": "UWFHD",
+  "panel": "VA",
+  "hz": 200,
+  "new": 600,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "34um88|34uc88",
+  "name": "LG 34UM88/UC88",
+  "inch": 34,
+  "res": "UWQHD",
+  "panel": "IPS",
+  "hz": 60,
+  "new": 450,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "34wk650",
+  "name": "LG 34WK650",
+  "inch": 34,
+  "res": "UWFHD",
+  "panel": "IPS",
+  "hz": 75,
+  "new": 300,
+  "disc": true,
+  "usbc": "no"
+ },
+ {
+  "re": "29bn650|29u511|29um65",
+  "name": "LG 29\" ultrawide FHD (otros)",
+  "inch": 29,
+  "res": "UWFHD",
+  "panel": "IPS",
+  "hz": 75,
+  "new": 180,
+  "disc": false,
+  "usbc": "no"
+ },
+ {
+  "re": "aw3423dw",
+  "name": "Alienware AW3423DW",
+  "inch": 34,
+  "res": "UWQHD",
+  "panel": "QD-OLED",
+  "hz": 175,
+  "new": 900,
+  "disc": true,
+  "usbc": "no"
+ }
+]
