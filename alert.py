@@ -185,7 +185,9 @@ def cmd_run(args):
     s["pause_until"], s["backoff_h"] = None, 1
     if cloud:  # no database in the cloud: rules run on the newest listings only
         pool = [db.enrich(dict({k: None for k in db.COLS}, **r)) for r in rows]
-        n_new = len([r for r in pool if r["id"] not in s.get("seen_ids", [])])
+        prev = set(s.get("seen_ids", []))
+        new_rows = [r for r in pool if r["id"] not in prev] if prev else []
+        n_new = len(new_rows)
         s["seen_ids"] = [r["id"] for r in pool]
     else:  # every active listing, so matches found by `db.py sync` or a price drop also notify
         c = db.con()
@@ -217,8 +219,52 @@ def cmd_run(args):
         notify.toast(f"🔔 +{len(hits) - shown} monitores más", "python -I alert.py log", "")
     if hits:
         notify.sound()
+    if cloud:
+        day = dt.date.today().isoformat()
+        d = s.setdefault("today", {})
+        if d.get("date") != day:
+            d.clear()
+            d.update(date=day, checks=0, new=0, alerts=0)
+        d["checks"] += 1
+        d["new"] += n_new
+        d["alerts"] += len(hits)
+        if t.hour >= cfg.get("heartbeat_hour", 21) and s.get("heartbeat") != day and cfg.get("heartbeat", True):
+            notify.ntfy(cfg.get("ntfy_topic"), "✅ Alertas de monitores activas",
+                        f"Hoy: {d['checks']} revisiones, {d['new']} anuncios nuevos vistos, {d['alerts']} alertas.",
+                        "", priority=2)
+            s["heartbeat"] = day
+        summary(cfg, pool, new_rows, hits, s)
     save_state(s)
-    print(f"{now()}: {len(rows)} newest listings ({n_new} new in DB), {len(hits)} alerts")
+    print(f"{now()}: {len(rows)} newest listings ({n_new} new), {len(hits)} alerts")
+
+
+def summary(cfg, pool, new_rows, hits, s):
+    """Markdown summary shown on the GitHub Actions run page."""
+    out = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not out:
+        return
+    hit_ids = {r["id"]: ru["name"] for ru, r in hits}
+    L = [f"### {now()} · {len(pool)} anuncios revisados · {len(new_rows)} nuevos desde la revisión anterior · "
+         f"{len(hits)} alertas", ""]
+    if new_rows:
+        L += ["| Anuncio | Precio | Tamaño | Res. | Dónde | Resultado |", "|---|---|---|---|---|---|"]
+        for r in new_rows[:40]:
+            ru = first_rule(cfg, r)
+            res = f"🔔 **{hit_ids[r['id']]}**" if r["id"] in hit_ids else (f"ya avisado ({ru['name']})" if ru else "no cumple reglas")
+            title = (r.get("model") or r.get("title") or "")[:60].replace("|", "/")
+            price = "€%.0f" % r["price"] if r.get("price") else "—"
+            inch = '%g"' % r["inch"] if r.get("inch") else "?"
+            L.append(f"| [{title}]({r['url']}) | {price} | {inch} | {r.get('res') or '?'} | "
+                     f"{r.get('city') or '?'} {r.get('km') or 0} km | {res} |")
+    match_now = [(first_rule(cfg, r), r) for r in pool]
+    match_now = [(ru, r) for ru, r in match_now if ru]
+    L += ["", f"**Ahora mismo cumplen alguna regla {len(match_now)} de los {len(pool)} anuncios más nuevos:**", ""]
+    L += [f"- [{(r.get('model') or r['title'])[:60]}]({r['url']}) · €{r.get('price') or 0:.0f} · {ru['name']}"
+          for ru, r in match_now[:15]]
+    d = s.get("today", {})
+    L += ["", f"Hoy: {d.get('checks', 0)} revisiones, {d.get('new', 0)} anuncios nuevos vistos, {d.get('alerts', 0)} alertas."]
+    with open(out, "a", encoding="utf-8") as f:
+        f.write("\n".join(L) + "\n")
 
 
 def cmd_test(args):
