@@ -49,14 +49,14 @@ def conf():
 
 
 # ---------------------------------------------------------------- rules
-def match(rule, r):
+def match(rule, r, price_factor=1.0):
     text = f"{r.get('title') or ''} \n {r.get('desc') or ''} \n {r.get('model') or ''}"
     p = r.get("price")
     if "max_price" in rule:
         if p is None:
             if not rule.get("allow_no_price"):
                 return False
-        elif p > rule["max_price"]:
+        elif p > rule["max_price"] * price_factor:
             return False
     inch = r.get("inch")
     if "min_inch" in rule and not (inch and inch >= rule["min_inch"]):
@@ -104,7 +104,11 @@ def globally_ok(cfg, r):
 def first_rule(cfg, r):
     if not globally_ok(cfg, r):
         return None
-    return next((ru for ru in cfg["rules"] if match(ru, r)), None)
+    factor = 1.0
+    primary = cfg.get("primary_center")
+    if primary and r.get("near") and primary not in r["near"]:  # only found around the other center: must be a steal
+        factor = cfg.get("other_center_price_factor", 1.0)
+    return next((ru for ru in cfg["rules"] if match(ru, r, factor)), None)
 
 
 def describe(rule, r):
@@ -154,6 +158,11 @@ def fetch_newest():
         j = hunt.mp_get(dict(base, postcode=pc))
         for x in j.get("listings") or []:
             r = hunt.mp_row(x)
+            r["near"] = city
+            if r["id"] in rows:  # found around both centers
+                old = rows[r["id"]]
+                r["near"] = f"{old['near']},{city}"
+                r["km"] = min(old["km"], r["km"])
             rows[r["id"]] = r
     out = []
     for r in rows.values():
