@@ -4,6 +4,7 @@
                                   (2 API calls), upsert into monitors.db, notify listings that match a rule
   python -I alert.py test         evaluate the rules against every active listing in the DB (no network, no toast)
   python -I alert.py toast        send a sample notification to check that toasts work
+  python -I alert.py ping         send a sample phone push only
   python -I alert.py seed         mark every current match as already notified (no toasts)
   python -I alert.py log          last 30 notified listings
 
@@ -245,6 +246,13 @@ def cmd_toast(args):
         print("phone push sent" if notify.ntfy(topic, t, b, u) else "phone push FAILED")
 
 
+def cmd_ping(args):
+    cfg = conf()
+    ok = notify.ntfy(cfg.get("ntfy_topic"), "🔔 Prueba desde la nube",
+                     "Las alertas de monitores funcionan desde GitHub Actions.", "https://www.marktplaats.nl")
+    print("phone push sent" if ok else "phone push FAILED (is NTFY_TOPIC set?)")
+
+
 def cmd_seed(args):
     s, c = load_state(), db.con()
     print(f"{seed(s, conf(), active_rows(c))} matches marked as seen")
@@ -261,7 +269,7 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(encoding="utf-8")
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
     try:
-        {"run": cmd_run, "test": cmd_test, "toast": cmd_toast, "seed": cmd_seed, "log": cmd_log}[cmd](sys.argv[2:])
+        {"run": cmd_run, "test": cmd_test, "toast": cmd_toast, "ping": cmd_ping, "seed": cmd_seed, "log": cmd_log}[cmd](sys.argv[2:])
     except Exception:  # noqa: BLE001  (scheduled runs have no console: keep the traceback)
         import traceback
         log("CRASH " + traceback.format_exc().replace("\n", " | "))

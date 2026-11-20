@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: "*/20 6-23 * * *"   # every 20 min, 07:00-00:40 Amsterdam (winter); ~1,600 Actions minutes/month
   workflow_dispatch:
+    inputs:
+      test_push:
+        description: Only send a test notification to the phone
+        type: boolean
+        default: false
 concurrency:
   group: alerts
   cancel-in-progress: false
@@ -21,7 +26,7 @@ jobs:
           key: alert-state-${{ github.run_id }}
           restore-keys: alert-state-
       - name: Check Marktplaats and push matches
-        run: python3 -I alert.py run --cloud
+        run: python3 -I alert.py ${{ inputs.test_push && 'ping' || 'run --cloud' }}
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
       - name: Save state
