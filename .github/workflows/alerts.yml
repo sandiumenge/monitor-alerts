@@ -1,7 +1,7 @@
 name: monitor-alerts
 on:
   schedule:
-    - cron: "*/20 6-23 * * *"   # every 20 min, 07:00-00:40 Amsterdam (winter); ~1,600 Actions minutes/month
+    - cron: "7,27,47 6-23 * * *"   # every 20 min at off-peak minutes, 07:07-00:47 Amsterdam (winter); ~1,600 Actions min/month
   workflow_dispatch:
     inputs:
       test_push:
