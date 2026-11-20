@@ -19,6 +19,7 @@ Usage (python -I db.py <cmd>):
   stats                         counts
 """
 import datetime as dt
+import html
 import json
 import re
 import sqlite3
@@ -74,7 +75,7 @@ EXTRAS = [
     (r"\bbon\b|factuur|aankoopbewijs|receipt|invoice", "factura"),
     (r"garantie|warranty", "garantía"),
     (r"monitor ?arm|ergo ?arm|ergo ?stand|\barm\b", "brazo"),
-    (r"(hdmi|displayport|dp|usb-?c|stroom|thunderbolt)[- ]?kabel|kabels? (inbegrepen|erbij|meegeleverd|incl)|incl(\.|usief)? (alle )?kabel|cables? included", "cables", True),
+    (r"(hdmi|displayport|dp|usb-?c|stroom|thunderbolt)[- ]?kabel|kabels? (inbegrepen|erbij|meegeleverd|incl)|incl(\.|usief)? (alle )?kabel|met (alle )?(benodigde |bijbehorende )?kabels|cables? included", "cables", True),
     (r"in hoogte verstelbaar|hoogte ?verstelbaar|height[- ]adjust\w*|\bpivot\b|kantelbaar en", "pie regulable"),
     (r"\bvesa\b", "VESA"), (r"\bkvm\b", "KVM"), (r"rj-?45|ethernet|netwerkpoort", "Ethernet"),
     (r"speakers?\b|luidspreker", "altavoces"), (r"afstandsbediening|remote control", "mando"),
@@ -249,8 +250,12 @@ def fetch_details(url):
     L = json.loads(h[i:e].strip().rstrip(";"))["listing"]
     bids = (L.get("bidsInfo") or {}).get("bids") or []
     st = L.get("stats") or {}
-    desc = re.sub(r"<[^>]+>", " ", L.get("description") or "")
-    desc = re.sub(r"\s+", " ", desc).strip()
+    raw = L.get("description") or ""
+    if not raw:  # since Nov 2026 the description is only in the rendered HTML, not in __CONFIG__
+        m = re.search(r'<div[^>]*class="[^"]*Description[^"]*"[^>]*>(.*?)</div>', h, re.S)
+        raw = m.group(1) if m else ""
+    desc = re.sub(r"<[^>]+>", " ", html.unescape(raw))
+    desc = re.sub(r"^\s*Beschrijving\s*", "", re.sub(r"\s+", " ", desc)).strip()
     return {"desc": desc, "n_bids": len(bids), "top_bid": max((b.get("value", 0) for b in bids), default=0) / 100 or None,
             "views": st.get("viewCount"), "favs": st.get("favoritedCount")}
 
