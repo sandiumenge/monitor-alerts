@@ -1,5 +1,5 @@
 {
- "_help": "Each rule: name + any of min_inch, max_inch, max_price, res / not_res [list, e.g. UWQHD/4K/QHD/UWFHD], panel [list], min_hz, usbc_charge (true), min_discount (%), models (regex on model/title/description), any (regex that must appear), none (regex that must NOT appear), no_damage (true), max_km, allow_no_price (true = also listings without a price). A listing fires the first rule it matches. Test changes with: python -I alert.py test Global: min_inch drops listings whose known size is smaller; exclude_title skips accessory-only titles unless exclude_title_unless also matches. Phone push topic: data/ntfy_topic.txt locally, NTFY_TOPIC secret in GitHub Actions.",
+ "_help": "Each rule: name + any of min_inch, max_inch, min_inch_if_known (skip only when the size is known and smaller), max_price, res / not_res [list, e.g. UWQHD/4K/QHD/UWFHD], panel [list], min_hz, usbc_charge (true), min_discount (%), models (regex on model/title/description), any (regex that must appear), none (regex that must NOT appear), no_damage (true), max_km, allow_no_price (true = also listings without a price). A listing fires the first rule it matches. Test changes with: python -I alert.py test Global: min_inch drops listings whose known size is smaller; exclude_title skips accessory-only titles unless exclude_title_unless also matches. Phone push topic: data/ntfy_topic.txt locally, NTFY_TOPIC secret in GitHub Actions.",
  "every_minutes": 10,
  "quiet_hours": [
   1,
@@ -28,20 +28,24 @@
    "no_damage": true
   },
   {
-   "name": "Ultrawide 34–35\" barato",
+   "name": "Ultrawide 34–35\" (con o sin USB‑C)",
    "res": [
     "UWQHD"
    ],
    "min_inch": 33.5,
-   "max_price": 90,
+   "max_price": 150,
    "no_damage": true
   },
   {
    "name": "Ultrawide sin modelo, barato",
    "any": "ultra ?-?wide|\\b34 ?(inch|\"|”|duim)|3440|21:9|\\b35 ?(inch|\"|”)",
    "none": "29 ?(inch|\"|”)|2560 ?x ?1080|uwfhd",
-   "max_price": 70,
-   "no_damage": true
+   "max_price": 100,
+   "no_damage": true,
+   "not_res": [
+    "UWFHD"
+   ],
+   "min_inch_if_known": 33
   },
   {
    "name": "32\" 4K",

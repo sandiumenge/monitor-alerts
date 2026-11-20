@@ -61,6 +61,8 @@ def match(rule, r):
     inch = r.get("inch")
     if "min_inch" in rule and not (inch and inch >= rule["min_inch"]):
         return False
+    if "min_inch_if_known" in rule and inch and inch < rule["min_inch_if_known"]:
+        return False
     if "max_inch" in rule and not (inch and inch <= rule["max_inch"]):
         return False
     if "res" in rule and r.get("res") not in rule["res"]:
