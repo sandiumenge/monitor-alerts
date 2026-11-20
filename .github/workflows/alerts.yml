@@ -1,7 +1,7 @@
 name: monitor-alerts
 on:
   schedule:
-    - cron: "7,27,47 6-23 * * *"   # every 20 min at off-peak minutes, 07:07-00:47 Amsterdam (winter); ~1,600 Actions min/month
+    - cron: "7,17,27,37,47,57 6-23 * * *"   # every 10 min at off-peak minutes, 07:07-00:57 Amsterdam (winter); public repo = unlimited minutes
   workflow_dispatch:
     inputs:
       test_push:

@@ -1,6 +1,6 @@
 # monitor-alerts
 
-Checks the newest Marktplaats "Monitoren" listings around Amsterdam and Utrecht every 20 minutes (GitHub Actions)
+Checks the newest Marktplaats "Monitoren" listings around Amsterdam and Utrecht every 10 minutes (GitHub Actions)
 and sends a phone push through ntfy when one matches a rule in `alerts.json`.
 
 - Rules: edit `alerts.json` (see its `_help`). Known models, sizes and new prices: `models.json`.
