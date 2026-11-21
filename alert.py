@@ -49,6 +49,8 @@ def conf():
     cfg = json.loads(RULES_P.read_text(encoding="utf-8"))
     topic_f = hunt.DATA / "ntfy_topic.txt"  # kept out of git; in GitHub Actions it comes from the NTFY_TOPIC secret
     cfg["ntfy_topic"] = os.environ.get("NTFY_TOPIC") or cfg.get("ntfy_topic") or         (topic_f.read_text(encoding="utf-8").strip() if topic_f.exists() else "")
+    # TVs go to their own topic (own thread in the ntfy app): same private name + "-tv", unless NTFY_TOPIC_TV is set
+    cfg["ntfy_topic_tv"] = os.environ.get("NTFY_TOPIC_TV") or (cfg["ntfy_topic"] + "-tv" if cfg["ntfy_topic"] else "")
     global WARN_DAMAGE
     WARN_DAMAGE = cfg.get("damage", "warn") == "warn"
     return cfg
@@ -261,8 +263,8 @@ def describe(rule, r, tag=""):
                                 f"USB‑C {r['usbc']}" if re.search(r"\d+W", r.get("usbc") or "") else ""] if x)
     name = r.get("model") or (r.get("title") or "")[:55]
     spec = ai_spec(r, "monitor") or spec
-    body = f"🔔 {rule['name']}\n{spec}{new_part(r, 'monitor')} · {where(r)}{bids(r)}"
-    return finish(name, body, r, tag, "monitor")
+    body = f"🖥️ {rule['name']}\n{spec}{new_part(r, 'monitor')} · {where(r)}{bids(r)}"
+    return finish(f"🖥️ {name}", body, r, tag, "monitor")
 
 
 def describe_tv(rule, r, tag=""):
@@ -575,7 +577,7 @@ def cmd_run(args):
         if shown < cfg.get("max_toasts", 4):
             notify.toast(title, body, r["url"])
             shown += 1
-        notify.ntfy(cfg.get("ntfy_topic"), title, body, r["url"])
+        notify.ntfy(cfg.get("ntfy_topic_tv"), title, body, r["url"])
         s["alerted"][r["id"]] = {"at": now(), "rule": ru["name"], "price": r.get("price"), "tv": True, "unsure": bool(tag)}
         log(f"ALERT TV{' ' + tag if tag else ''} [{ru['name']}] {r['id']} €{r.get('price')} {r['title']!r} {r.get('city')} {r['url']}")
     hits_all = hits + tv_hits
@@ -700,10 +702,13 @@ def cmd_toast(args):
 
 def cmd_ping(args):
     cfg = conf()
-    ok = notify.ntfy(cfg.get("ntfy_topic"), "P97 (€75) Iiyama XUB3493WQSU-B1 · 🟠 LIGHT",
+    ok = notify.ntfy(cfg.get("ntfy_topic"), "P97 (€75) 🖥️ Iiyama XUB3493WQSU-B1 · 🟠 LIGHT",
                      "🟠 LIGHTLY DAMAGED: «2 dode pixels rechtsboven, verder perfect»\n"
-                     "🔔 Ultrawide 34–35\" (con o sin USB‑C)\n34\" UWQHD 75Hz · −77% (~€330) · Amsterdam 3,2 km\n"
+                     "🖥️ Ultrawide 34–35\" (con o sin USB‑C)\n34\" UWQHD 75Hz · −77% (~€330) · Amsterdam 3,2 km\n"
                      "(EJEMPLO de prueba, no es un anuncio real)", "https://www.marktplaats.nl")
+    ok = notify.ntfy(cfg.get("ntfy_topic_tv"), "P93 (€80) 📺 Philips 55PUS6753",
+                     "📺 Tele 4K ≥55\" barata\n55\" 4K LED Smart 2018 · −90% (~€800) · Amsterdam 1,6 km\n"
+                     "(EJEMPLO de prueba, no es un anuncio real)", "https://www.marktplaats.nl") and ok
     print("phone push sent" if ok else "phone push FAILED (is NTFY_TOPIC set?)")
 
 
