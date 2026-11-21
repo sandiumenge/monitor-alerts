@@ -115,24 +115,16 @@ def apply(r, a, kind):
 
 
 def line(r):
-    """One push line: '🤖 LG 55UK6300 (2018) · 4K LED · nuevo ~€450 (−82 %) · note'."""
+    """Extra push line only when the AI sees a defect the listing does not mention (specs, model and new price
+    already go in the title and spec line: alert.ai_spec / new_part; the note is kept out to stay short)."""
     a = r.get("ai")
     if not a:
         return ""
-    spec = " ".join(str(x) for x in [a.get("res") or "", a.get("panel") or "", a.get("year") or ""] if x)
-    parts = [a.get("model") or "modelo desconocido", spec]
-    new = a.get("new_price_eur")
-    if isinstance(new, (int, float)) and r.get("new_price") and abs(new - r["new_price"]) > 0.2 * r["new_price"]:
-        parts.append(f"IA: nuevo ~€{new:.0f}")  # the spec line shows the price used; this only when they differ
-    if a.get("confidence") and a["confidence"] != "alta":
-        parts.append(f"confianza {a['confidence']}")
-    s = "🤖 " + " · ".join(p for p in parts if p)
-    if a.get("note"):
-        s += f"\n🤖 {a['note'][:110]}"
+    s = ""
     if a.get("defects") and a.get("damage") not in ("light", "heavy") and not r.get("damage") and \
             not re.match(r"(ninguno|ninguna|no |sin |none|nada)", a["defects"], re.I):
         s += f"\n🤖 La IA ve: {a['defects'][:100]}"  # light/heavy verdicts are shown in the damage line instead
-    return s
+    return s.strip()
 
 
 if __name__ == "__main__":

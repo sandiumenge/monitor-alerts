@@ -206,7 +206,6 @@ def load_points():
 
 
 POINTS = load_points()
-WORK_MAX_KM = 25
 
 
 def km_to(r, p):
@@ -220,17 +219,31 @@ def fmt_km(k):
 
 
 def where(r):
-    """'Amsterdam 3,2 km · 💼 5,1 km': distance to the nearest home point and to work (if close); falls back to
-    Marktplaats' distance to the search center when the listing has no coordinates."""
+    """'Amsterdam 3,2 km' or 'Amsterdam 💼 2,1 km': distance to the nearest point only (💼 when that is work);
+    falls back to Marktplaats' distance to the search center when the listing has no coordinates."""
     city = r.get("city") or "?"
     if r.get("lat") is None or r.get("lon") is None or not POINTS:
         return f"{city} {r.get('km') or 0} km"
-    homes = [km_to(r, p) for p in POINTS if not p.get("work")]
-    s = f"{city} {fmt_km(min(homes))} km" if homes else city
-    for p in POINTS:
-        if p.get("work") and km_to(r, p) <= WORK_MAX_KM:
-            s += f" · 💼 {fmt_km(km_to(r, p))} km"
-    return s
+    k, p = min((km_to(r, p), i) for i, p in enumerate(POINTS))
+    return f"{city} {'💼 ' if POINTS[p].get('work') else ''}{fmt_km(k)} km"
+
+
+def ai_spec(r, kind):
+    """The DeepSeek specs as the spec line ('55" 4K LED Smart 2018', '4K?' when its confidence is low), with the
+    listing's own data only filling gaps. '' when the AI did not run (budget/failure): the regex line is used."""
+    a = r.get("ai")
+    if not a:
+        return ""
+    def g(f):
+        return a.get(f) if a.get(f) not in (None, "") else r.get(f)
+    inch, hz = g("inch"), g("hz")
+    usb = f"USB‑C {a['usbc_w']}W" if a.get("usbc_w") else \
+        f"USB‑C {r['usbc']}" if re.search(r"\d+W", r.get("usbc") or "") else ""
+    res = (g("res") or "") + ("?" if g("res") and a.get("confidence") == "baja" else "")
+    return " ".join(str(x) for x in [
+        f"{inch:g}\"" if isinstance(inch, (int, float)) else "", res, g("panel") or "",
+        f"{hz}Hz" if hz and (kind != "tv" or hz > 60) else "", "Smart" if kind == "tv" and g("smart") else "",
+        usb if kind != "tv" else "", g("year") or ""] if x)
 
 
 def new_part(r, kind):
@@ -247,6 +260,7 @@ def describe(rule, r, tag=""):
                                 f"{r['hz']}Hz" if r.get("hz") else "",
                                 f"USB‑C {r['usbc']}" if re.search(r"\d+W", r.get("usbc") or "") else ""] if x)
     name = r.get("model") or (r.get("title") or "")[:55]
+    spec = ai_spec(r, "monitor") or spec
     body = f"🔔 {rule['name']}\n{spec}{new_part(r, 'monitor')} · {where(r)}{bids(r)}"
     if r.get("model"):
         body = f"{(r.get('title') or '')[:70]}\n{body}"
@@ -256,8 +270,10 @@ def describe(rule, r, tag=""):
 def describe_tv(rule, r, tag=""):
     spec = " ".join(x for x in [f"{r['inch']}\"", (r.get("res") or "") + ("?" if r.get("res_guess") else ""), r.get("panel") or "",
                                 "Smart" if r.get("smart") else "", str(r["year"]) if r.get("year") else ""] if x)
+    name = f"📺 {((r.get('ai') or {}).get('model') or r.get('title') or '')[:55]}"
+    spec = ai_spec(r, "tv") or spec
     body = f"📺 {rule['name']}\n{spec}{new_part(r, 'tv')} · {where(r)}{bids(r)}"
-    return finish(f"📺 {(r.get('title') or '')[:55]}", body, r, tag, "tv")
+    return finish(name, body, r, tag, "tv")
 
 
 def finish(name, body, r, tag, kind):
@@ -273,10 +289,10 @@ def finish(name, body, r, tag, kind):
     if tag:
         title += " ❓"
     a = ai.line(r)
-    if tag and not a:
+    if tag and not r.get("ai"):
         a = "❓ Falta un dato clave (resolución/tamaño) y no se pudo comprobar"
     elif tag:
-        a += "\n❓ La IA no lo confirma del todo: míralo"
+        a = (a + "\n" if a else "") + "❓ La IA no lo confirma del todo: míralo"
     return title, f"{body}\n{a}" if a else body
 
 
