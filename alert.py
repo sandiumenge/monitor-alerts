@@ -262,8 +262,6 @@ def describe(rule, r, tag=""):
     name = r.get("model") or (r.get("title") or "")[:55]
     spec = ai_spec(r, "monitor") or spec
     body = f"🔔 {rule['name']}\n{spec}{new_part(r, 'monitor')} · {where(r)}{bids(r)}"
-    if r.get("model"):
-        body = f"{(r.get('title') or '')[:70]}\n{body}"
     return finish(name, body, r, tag, "monitor")
 
 
@@ -704,9 +702,8 @@ def cmd_ping(args):
     cfg = conf()
     ok = notify.ntfy(cfg.get("ntfy_topic"), "P97 (€75) Iiyama XUB3493WQSU-B1 · 🟠 LIGHT",
                      "🟠 LIGHTLY DAMAGED: «2 dode pixels rechtsboven, verder perfect»\n"
-                     "🔔 Ultrawide 34–35\" (con o sin USB‑C)\n34\" UWQHD 75Hz · −77% (~€330) · Amsterdam 3,2 km · 💼 5,1 km\n"
-                     "🤖 Iiyama ProLite XUB3493WQSU-B1 · UWQHD IPS 2019\n"
-                     "🤖 (EJEMPLO de prueba, no es un anuncio real)", "https://www.marktplaats.nl")
+                     "🔔 Ultrawide 34–35\" (con o sin USB‑C)\n34\" UWQHD 75Hz · −77% (~€330) · Amsterdam 3,2 km\n"
+                     "(EJEMPLO de prueba, no es un anuncio real)", "https://www.marktplaats.nl")
     print("phone push sent" if ok else "phone push FAILED (is NTFY_TOPIC set?)")
 
 
