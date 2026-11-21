@@ -29,7 +29,7 @@ SHARP = {"4k": "4K", "8k": "8K", "full-hd": "FHD", "hd-ready": "HD"}
 PANEL_TXT = [("OLED", r"\b(w?oled|qd-?oled)\b"), ("QLED", r"\b(qled|neo ?qled|mini ?led|nanocell|qned)\b"),
              ("PLASMA", r"\bplasma\b"), ("LED", r"\bled\b"), ("LCD", r"\blcd\b")]
 SMART_RX = re.compile(r"smart|android|google tv|webos|tizen|netflix|youtube|wifi|wi-fi|chromecast|ambilight", re.I)
-DAMAGE_RX = re.compile(r"kapot|defect|stuk\b|gebroken|barst|scheur|streep|strepen|lijn(en)? in|vlek|backlight|"
+DAMAGE_RX = re.compile(r"kapot|defect|stuk\b|gebroken|barst|scheur|streep|strepen|lijn(en)? in|vlek|backlight\w*\s+(is\s+)?(kapot|defect|stuk|probleem|problemen|issue|werkt niet|gaat uit)|"
                        r"geen beeld|doet het niet|niet werkend|onderdelen|voor parts|parts|reparatie|beschadig|schade|\bgebrek(en)?\b|blauw\w* scherm|scherm (vervang|kapot)\w*|af en toe|"
                        r"afwijking|gefixt|fixen|repareren|moet gemaakt|inbrand|"
                        r"donker\w* (baan|band|balk|vlek|plek|rand|strook|gedeelte|schaduw)|valt .{0,30}donker|donkerder|"

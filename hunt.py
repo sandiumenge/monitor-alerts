@@ -92,6 +92,7 @@ def mp_row(x):
         "desc": clean(x.get("categorySpecificDescription") or x.get("description") or ""),
         "price": cents / 100 if cents else None, "ptype": pi.get("priceType"),
         "city": clean(loc.get("cityName", "")), "km": round((loc.get("distanceMeters") or 0) / 1000),
+        "lat": loc.get("latitude"), "lon": loc.get("longitude"),
         "date": d.isoformat() if d else x.get("date"), "url": "https://www.marktplaats.nl" + vip,
         "attrs": attrs, "cat": x.get("categoryId"),
         "imgs": [p["largeUrl"] for p in (x.get("pictures") or []) if p.get("largeUrl")][:3],  # for the AI check

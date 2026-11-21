@@ -121,9 +121,9 @@ def line(r):
         return ""
     spec = " ".join(str(x) for x in [a.get("res") or "", a.get("panel") or "", a.get("year") or ""] if x)
     parts = [a.get("model") or "modelo desconocido", spec]
-    if a.get("new_price_eur"):
-        d = f" (−{r['discount']} %)" if r.get("discount") is not None and r["discount"] > 0 else ""
-        parts.append(f"nuevo ~€{a['new_price_eur']:.0f}{d}")
+    new = a.get("new_price_eur")
+    if isinstance(new, (int, float)) and r.get("new_price") and abs(new - r["new_price"]) > 0.2 * r["new_price"]:
+        parts.append(f"IA: nuevo ~€{new:.0f}")  # the spec line shows the price used; this only when they differ
     if a.get("confidence") and a["confidence"] != "alta":
         parts.append(f"confianza {a['confidence']}")
     s = "🤖 " + " · ".join(p for p in parts if p)

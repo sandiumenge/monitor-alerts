@@ -13,6 +13,7 @@ all checks for an hour (doubling up to 8 h while errors persist).
 """
 import datetime as dt
 import json
+import math
 import os
 import random
 import re
@@ -193,13 +194,60 @@ def severity(r):
     return "light"
 
 
+def load_points():
+    """Personal reference points [{"lat", "lon", "work"?}], kept out of the public repo: env ALERT_POINTS
+    (GitHub secret) or data/points.json (gitignored)."""
+    f = hunt.DATA / "points.json"
+    raw = os.environ.get("ALERT_POINTS", "").strip() or (f.read_text(encoding="utf-8") if f.exists() else "")
+    try:
+        return json.loads(raw) if raw else []
+    except ValueError:
+        return []
+
+
+POINTS = load_points()
+WORK_MAX_KM = 25
+
+
+def km_to(r, p):
+    la1, lo1, la2, lo2 = map(math.radians, (r["lat"], r["lon"], p["lat"], p["lon"]))
+    h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
+    return 12742 * math.asin(math.sqrt(h))
+
+
+def fmt_km(k):
+    return f"{k:.1f}".replace(".", ",") if k < 10 else f"{k:.0f}"
+
+
+def where(r):
+    """'Amsterdam 3,2 km · 💼 5,1 km': distance to the nearest home point and to work (if close); falls back to
+    Marktplaats' distance to the search center when the listing has no coordinates."""
+    city = r.get("city") or "?"
+    if r.get("lat") is None or r.get("lon") is None or not POINTS:
+        return f"{city} {r.get('km') or 0} km"
+    homes = [km_to(r, p) for p in POINTS if not p.get("work")]
+    s = f"{city} {fmt_km(min(homes))} km" if homes else city
+    for p in POINTS:
+        if p.get("work") and km_to(r, p) <= WORK_MAX_KM:
+            s += f" · 💼 {fmt_km(km_to(r, p))} km"
+    return s
+
+
+def new_part(r, kind):
+    """' · −94% (~€400)': discount vs the new/market price (models.json, the AI, or the prices.py estimate)."""
+    new = r.get("new_price") or prices.new_of(r, kind)
+    if not new or not r.get("price"):
+        return ""
+    d = round((1 - r["price"] / new) * 100)
+    return f" · −{d}% (~€{new:.0f})" if d > 0 else f" · nuevo ~€{new:.0f}"
+
+
 def describe(rule, r, tag=""):
     spec = " ".join(x for x in [f"{r['inch']:g}\"" if r.get("inch") else "", r.get("res") or "",
                                 f"{r['hz']}Hz" if r.get("hz") else "",
                                 f"USB‑C {r['usbc']}" if re.search(r"\d+W", r.get("usbc") or "") else ""] if x)
-    disc = f" · −{r['discount']}%" if r.get("discount") else ""
     name = r.get("model") or (r.get("title") or "")[:55]
-    body = f"🔔 {rule['name']}\n{spec}{disc} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}"
+    body = f"🔔 {rule['name']}\n{spec}{new_part(r, 'monitor')} · {where(r)}{bids(r)}"
     if r.get("model"):
         body = f"{(r.get('title') or '')[:70]}\n{body}"
     return finish(name, body, r, tag, "monitor")
@@ -208,7 +256,7 @@ def describe(rule, r, tag=""):
 def describe_tv(rule, r, tag=""):
     spec = " ".join(x for x in [f"{r['inch']}\"", (r.get("res") or "") + ("?" if r.get("res_guess") else ""), r.get("panel") or "",
                                 "Smart" if r.get("smart") else "", str(r["year"]) if r.get("year") else ""] if x)
-    body = f"📺 {rule['name']}\n{spec} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}"
+    body = f"📺 {rule['name']}\n{spec}{new_part(r, 'tv')} · {where(r)}{bids(r)}"
     return finish(f"📺 {(r.get('title') or '')[:55]}", body, r, tag, "tv")
 
 
@@ -640,8 +688,8 @@ def cmd_ping(args):
     cfg = conf()
     ok = notify.ntfy(cfg.get("ntfy_topic"), "P97 (€75) Iiyama XUB3493WQSU-B1 · 🟠 LIGHT",
                      "🟠 LIGHTLY DAMAGED: «2 dode pixels rechtsboven, verder perfect»\n"
-                     "🔔 Ultrawide 34–35\" (con o sin USB‑C)\n34\" UWQHD 75Hz · −77% · Amsterdam 3 km\n"
-                     "🤖 Iiyama ProLite XUB3493WQSU-B1 · UWQHD IPS 2019 · nuevo ~€330 (−77 %)\n"
+                     "🔔 Ultrawide 34–35\" (con o sin USB‑C)\n34\" UWQHD 75Hz · −77% (~€330) · Amsterdam 3,2 km · 💼 5,1 km\n"
+                     "🤖 Iiyama ProLite XUB3493WQSU-B1 · UWQHD IPS 2019\n"
                      "🤖 (EJEMPLO de prueba, no es un anuncio real)", "https://www.marktplaats.nl")
     print("phone push sent" if ok else "phone push FAILED (is NTFY_TOPIC set?)")
 

@@ -41,6 +41,7 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          ALERT_POINTS: ${{ secrets.ALERT_POINTS }}
       - name: Save state
         if: always()
         uses: actions/cache/save@v4
