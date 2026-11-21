@@ -491,6 +491,7 @@ def cmd_run(args):
     cfg, s = conf(), load_state()
     rules = cfg["rules"]
     cloud = "--cloud" in args or os.environ.get("GITHUB_ACTIONS") == "true"
+    print(f"distance points: {len(POINTS)} ({sum(1 for p in POINTS if p.get('work'))} work)")  # no coordinates logged
     t = dt.datetime.now()
     q0, q1 = cfg.get("quiet_hours", [1, 7])
     if "--force" not in args:
