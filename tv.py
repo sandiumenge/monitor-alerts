@@ -21,7 +21,7 @@ NOT_WORKING = "Niet werkend"
 INCH_RX = re.compile(r"(?<![\d.,])(\d{2})(?:[.,]\d)?\s*(?:inch|in\b|\"|''|”|″|duim|zoll|-inch)", re.I)
 CM_RX = re.compile(r"(?<!\d)(1\d{2}|2[0-2]\d)\s*cm", re.I)
 # Model codes that start with the size: UE55TU7000, QE65Q80, GQ55, 55UK6300, OLED55C1, 55PUS7303, KD-55X85, TX-50..., 50A6BG
-CODE_RX = re.compile(r"\b(?:UE|QE|GQ|GU|UN|OLED|KD-?|KDL-?|XR-?|TX-?|TH-?|TQ)?(\d{2})(?=(?:[A-Z]{1,4}\d|(?!CM\b|INCH|IN\b|HZ\b|KG\b|MM\b|CM\s)[A-Z]{2,5}\b))")
+CODE_RX = re.compile(r"\b(?:UE|QE|GQ|GU|UN|OLED|KD-?|KDL-?|XR-?|TX-?|TH-?|TQ)?(\d{2})(?![xX×]\s?\d)(?=(?:[A-Z]{1,4}\d|(?!CM\b|INCH|IN\b|HZ\b|KG\b|MM\b|CM\s)[A-Z]{2,5}\b))")
 RES_TXT = [("8K", r"\b8k\b"), ("4K", r"\b(4k|uhd|ultra ?hd|2160p?|3840)"), ("FHD", r"(full ?hd|fhd|1080p?|1920\s*x\s*1080)"),
            ("HD", r"(hd ?ready|\b720p?\b|1366)")]
 SHARP = {"4k": "4K", "8k": "8K", "full-hd": "FHD", "hd-ready": "HD"}
@@ -29,11 +29,12 @@ PANEL_TXT = [("OLED", r"\b(w?oled|qd-?oled)\b"), ("QLED", r"\b(qled|neo ?qled|mi
              ("PLASMA", r"\bplasma\b"), ("LED", r"\bled\b"), ("LCD", r"\blcd\b")]
 SMART_RX = re.compile(r"smart|android|google tv|webos|tizen|netflix|youtube|wifi|wi-fi|chromecast|ambilight", re.I)
 DAMAGE_RX = re.compile(r"kapot|defect|stuk\b|gebroken|barst|scheur|streep|strepen|lijn(en)? in|vlek|backlight|"
-                       r"geen beeld|doet het niet|niet werkend|onderdelen|voor parts|parts|reparatie|beschadig|schade|afwijking|inbrand|"
+                       r"geen beeld|doet het niet|niet werkend|onderdelen|voor parts|parts|reparatie|beschadig|schade|\bgebrek(en)?\b|blauw\w* scherm|scherm (vervang|kapot)\w*|af en toe|"
+                       r"afwijking|gefixt|fixen|repareren|moet gemaakt|inbrand|"
                        r"burn.?in|dode pixel|pixel(fout|s? defect)|flikker|knippert|start niet|gaat (steeds )?uit", re.I)
 ACCESSORY_RX = re.compile(r"^(?!.*\b(tv|televisie)\b.*\b(met|incl|inclusief)\b).*\b(muurbeugel|beugel|wandbeugel|"
                           r"standaard|voet(en)?|afstandsbediening|remote|meubel|kast|tv-?kast|tv-?meubel|soundbar|"
-                          r"kabel|mount|steun|lift|onderdel\w*|moederbord|mainboard|voeding\w*|print|board|bord|t-?con|"
+                          r"kabel|mount|steun|lift|onderdel\w*|printplaat|firmware|moederbord|mainboard|voeding\w*|print|board|bord|t-?con|"
                           r"led ?strips?|doos|verpakking|computer|pc|laptop|projector|beamer|folie|table|tafel)\b", re.I)
 BRANDS = "samsung|lg|sony|philips|panasonic|hisense|tcl|sharp|toshiba|grundig|xiaomi|jvc|telefunken|salora|blaupunkt|" \
          "medion|thomson|nokia|loewe|bang|metz|kiano|finlux|techwood|haier|akai|denver|strong|continental"
@@ -86,12 +87,16 @@ def parse(r):
         r["inch_src"] = ">=40 (attr)"
     r["res"] = SHARP.get((a.get("sharpness") or "").lower()) or first(RES_TXT, text)
     r["panel"] = first(PANEL_TXT, text) or ((a.get("type") or "").upper() or None)
+    r["year"] = year_of(text)
+    if r["panel"] == "PLASMA":  # plasmas were never 4K and stopped in 2014: any later year is a purchase date
+        r["year"] = r["year"] if r["year"] and r["year"] <= 2014 else None
+    elif not r["res"] and r["year"] and r["year"] >= 2017 and (r["inch"] or 0) >= 50:
+        r["res"] = "4K"  # practically every 50"+ TV since 2017 is 4K
     r["smart"] = not re.search(r"geen smart|niet smart|no smart|not smart", text, re.I) and bool(SMART_RX.search(text) or "smarttv" in str(a.get("properties", "")).lower())
     hz = re.search(r"(100|120|144)\s*hz", text, re.I)
     r["hz"] = int(hz.group(1)) if hz else (int(a["refreshRate"].split()[0]) if a.get("refreshRate") not in (None, "50 Hz") else None)
     b = re.search(rf"\b({BRANDS})\b", text, re.I) or re.search(rf"\b({BRANDS})\b", a.get("brand", ""), re.I)
     r["brand"] = b.group(1).lower() if b else (a.get("brand") or "").lower() or None
-    r["year"] = year_of(text)
     r["cond"] = a.get("condition")
     r["damage"] = bool(DAMAGE_RX.search(text)) or r["cond"] == NOT_WORKING
     r["accessory"] = bool(ACCESSORY_RX.search(r["title"]))
