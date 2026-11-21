@@ -1,16 +1,23 @@
-"""Price percentile: how cheap a listing is compared with every similar listing seen so far.
+"""Value percentile (P0–P99): how good a deal a listing is compared with every TV (≥50") or monitor (≥31") seen.
 
-P97 = cheaper than 97 % of the comparable listings (same kind, size band and resolution/panel tier). Damaged,
-accessory and price-less listings are left out of the reference. Similar = for TVs size band (50–54, 55–64, 65+)
-x tier (OLED/QLED, 4K, rest); for monitors the resolution class (ultrawide, 4K, QHD, UWFHD, rest), all ≥ 31".
+Score = discount vs. new price + a small bonus for how expensive the product is new:
+    score = (1 − price / new) + W · log10(new)
+With W = 0.05 each ×10 in new price is worth 5 discount points: €100→€10 (−90 %) scores a bit below
+€1000→€100 (−90 %), and the discount still matters most. P98 = a better score than 98 % of all listings seen.
 
-The reference lives in prices_ref.json (built locally from the database and the last TV sweep) and grows in the
-cloud: alert.py adds every newly seen listing to the state ("price_hist").
+New price: monitors use models.json when the model is known; otherwise (and for every TV) an estimate of what an
+equivalent new product costs today, from size and resolution/panel. Damaged, accessory and price-less listings are
+left out of the reference.
+
+Reference: prices_ref.json (built locally from the database and the last TV sweep) + every listing the cloud run
+sees (state "value_hist").
 
   python -I prices.py build      rebuild prices_ref.json from data/monitors.db and the last data/tv_*.json
-  python -I prices.py show       group sizes and medians
+  python -I prices.py show       reference sizes and score quantiles
 """
 import json
+import math
+import re
 import sqlite3
 import statistics
 import sys
@@ -18,36 +25,41 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 REF_P = ROOT / "prices_ref.json"
-MIN_N = 15  # below this, fall back to the broader group
+W = 0.05
+MIN_N = 30
 
 
-def tv_group(r):
+def tv_new(r):
     inch = r.get("inch") or 0
     if inch < 50:
         return None
-    band = "50–54\"" if inch < 55 else "55–64\"" if inch < 65 else "65\"+"
-    tier = "OLED/QLED" if r.get("panel") in ("OLED", "QLED") else "4K" if r.get("res") in ("4K", "8K") else "HD/FHD/?"
-    return f"tv {band} {tier}"
+    base = 330 * (inch / 50) ** 2.3  # 4K LED today: 50" ≈ €330, 55" ≈ €410, 65" ≈ €600, 75" ≈ €840
+    panel, res = r.get("panel"), r.get("res")
+    k = 2.5 if panel == "OLED" else 1.4 if panel == "QLED" else 0.5 if panel == "PLASMA" else \
+        1.0 if res in ("4K", "8K") else 0.75 if res in ("FHD", "HD") else 0.8
+    return round(base * k)
 
 
-def mon_group(r):
-    if (r.get("inch") or 0) < 31:
+MON_NEW = {"5K2K": 900, "UWQHD": 400, "DQHD": 900, "DFHD": 700, "4K": 380, "QHD": 260, "UWFHD": 280}
+
+
+def mon_new(r):
+    inch = r.get("inch") or 0
+    if inch < 31:
         return None
-    res = r.get("res") or ""
-    cls = ("ultrawide" if res.startswith(("UWQHD", "5K2K", "DFHD", "DQHD")) else "4K" if res.startswith("4K")
-           else "QHD" if res.startswith("QHD") else "UWFHD" if res.startswith("UWFHD") else "FHD/?")
-    return f"mon {cls}"
+    if r.get("new_price"):
+        return r["new_price"]
+    res = (r.get("res") or "").split()[0] if r.get("res") else ""
+    n = MON_NEW.get(res, 170)
+    return round(n * (1.6 if inch >= 37 and res.startswith(("UW", "5K", "D")) else 1.0))
 
 
-def broader(g):
-    return " ".join(g.split()[:2]) if g.startswith("tv") else "mon all"
+def new_of(r, kind):
+    return tv_new(r) if kind == "tv" else mon_new(r)
 
 
-def label(g):
-    k, *rest = g.split()
-    if k == "tv":
-        return f"teles {' '.join(rest)}"
-    return "monitores ≥31\"" if rest == ["all"] else f"monitores {rest[0]} ≥31\""
+def score(price, new):
+    return (1 - price / new) + W * math.log10(new)
 
 
 def usable(r, kind):
@@ -57,51 +69,49 @@ def usable(r, kind):
     d = r.get("damage")
     if kind == "tv":
         return not d
+    t = r.get("title") or ""
+    if NOT_MONITOR.search(t) or (EXCL[0] and re.search(EXCL[0], t, re.I) and not re.search(EXCL[1], t, re.I)):
+        return False  # stands, arms, cables, "past ook" ads: not a monitor
     return not (d and set(str(d).split(", ")) - {"sin cable/fuente"})
 
 
-def group_of(r, kind):
-    return tv_group(r) if kind == "tv" else mon_group(r)
+NOT_MONITOR = re.compile(r"\b(kabel|cable|adapter|schoen\w*|stand(aard)?|houder|beugel|arm|lamp|lightbar)\b|"
+                         r"bureaustandaard|monitorstandaard|monitorarm", re.I)
+_cfg = json.loads((ROOT / "alerts.json").read_text(encoding="utf-8"))
+EXCL = (_cfg.get("exclude_title"), _cfg.get("exclude_title_unless", "$^"))
 
 
 def add(ref, r, kind):
-    g = group_of(r, kind)
-    if g and usable(r, kind):
-        for key in (g, broader(g)):
-            ref.setdefault(key, {})[r["id"]] = r["price"]
+    new = new_of(r, kind)
+    if new and usable(r, kind):
+        ref.setdefault(kind, {})[r["id"]] = [r["price"], new]
 
 
 def load(extra=None):
     ref = json.loads(REF_P.read_text(encoding="utf-8")) if REF_P.exists() else {}
-    for g, d in (extra or {}).items():
-        ref.setdefault(g, {}).update(d)
-    return ref
+    for k, d in (extra or {}).items():
+        if k in ("tv", "monitor"):
+            ref.setdefault(k, {}).update(d)
+    return {k: sorted(score(p, n) for i, (p, n) in v.items()) for k, v in ref.items()}
 
 
 def percentile(ref, r, kind):
-    """(P, n, group) or None. P = % of comparable listings priced higher (ties count half)."""
-    g, p = group_of(r, kind), r.get("price")
-    if not g or not p:
+    new, p = new_of(r, kind), r.get("price")
+    scores = ref.get(kind) or []
+    if not new or not p or len(scores) < MIN_N:
         return None
-    for key in (g, broader(g)):
-        prices = [v for k, v in (ref.get(key) or {}).items() if k != r.get("id")]
-        if len(prices) >= MIN_N:
-            hi = sum(1 for x in prices if x > p) + 0.5 * sum(1 for x in prices if x == p)
-            return min(99, round(100 * hi / len(prices))), len(prices), key
-    return None
+    s = score(p, new)
+    lo = sum(1 for x in scores if x < s) + 0.5 * sum(1 for x in scores if x == s)
+    return min(99, round(100 * lo / len(scores)))
 
 
-def line(ref, r, kind):
-    x = percentile(ref, r, kind)
-    if not x:
-        return ""
-    pc, n, g = x
-    return f"📊 P{pc} · más barato que el {pc} % de {n} {label(g)} vistos"
+def tag(ref, r, kind):
+    pc = percentile(ref, r, kind)
+    return f"P{pc}" if pc is not None else ""
 
 
 def build():
     sys.path.insert(0, str(ROOT))
-    import db  # noqa: E402
     import tv  # noqa: E402
     ref = {}
     c = sqlite3.connect(ROOT / "data" / "monitors.db")
@@ -113,14 +123,13 @@ def build():
         for r in json.loads(sweeps[-1].read_text(encoding="utf-8")):
             add(ref, tv.parse(r), "tv")
     REF_P.write_text(json.dumps(ref, ensure_ascii=False, separators=(",", ":"), sort_keys=True), encoding="utf-8")
-    show(ref)
+    show()
 
 
-def show(ref=None):
-    ref = ref or load()
-    for g in sorted(ref):
-        v = list(ref[g].values())
-        print(f"{g:28} n={len(v):5}  mediana €{statistics.median(v):.0f}")
+def show():
+    for k, v in load().items():
+        q = statistics.quantiles(v, n=10)
+        print(f"{k:8} n={len(v):5}  P10 {q[0]:.2f}  P50 {q[4]:.2f}  P90 {q[8]:.2f}  max {max(v):.2f}")
 
 
 if __name__ == "__main__":

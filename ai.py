@@ -32,9 +32,11 @@ SYSTEM = (
     '{"model": str|null, "inch": number|null, "res": "HD"|"FHD"|"QHD"|"UWFHD"|"UWQHD"|"4K"|"5K2K"|"8K"|null, '
     '"panel": "OLED"|"QLED"|"LED"|"LCD"|"PLASMA"|"IPS"|"VA"|"TN"|null, "smart": bool|null, "hz": int|null, '
     '"year": int|null, "usbc_w": int|null, "new_price_eur": number|null, "confidence": "alta"|"media"|"baja", '
-    '"defects": str|null, "note": str}\n'
+    '"defects": str|null, "damage": "none"|"light"|"heavy", "note": str}\n'
     "usbc_w = USB-C power delivery in watts (monitors only). defects = any damage or fault the seller mentions or "
-    "the photos show, in Spanish, short; null when there is none. note = one short sentence in Spanish for the buyer (max 90 characters): "
+    "the photos show, in Spanish, short; null when there is none. damage = light for small faults a buyer can live "
+    "with (a few dead or white pixels, slight backlight bleed, a dent in the casing, missing remote/stand), heavy for "
+    "scratches on the screen, cracks, lines, dark or discoloured areas, burn-in, flickering or not working. note = one short sentence in Spanish for the buyer (max 90 characters): "
     "what it is and whether the price is good."
 )
 
@@ -127,8 +129,9 @@ def line(r):
     s = "🤖 " + " · ".join(p for p in parts if p)
     if a.get("note"):
         s += f"\n🤖 {a['note'][:110]}"
-    if a.get("defects") and not r.get("damage") and not re.match(r"(ninguno|ninguna|no |sin |none|nada)", a["defects"], re.I):
-        s += f"\n⚠️ IA: {a['defects'][:100]}"
+    if a.get("defects") and a.get("damage") not in ("light", "heavy") and not r.get("damage") and \
+            not re.match(r"(ninguno|ninguna|no |sin |none|nada)", a["defects"], re.I):
+        s += f"\n🤖 La IA ve: {a['defects'][:100]}"  # light/heavy verdicts are shown in the damage line instead
     return s
 
 

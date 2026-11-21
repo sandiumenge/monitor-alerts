@@ -57,13 +57,17 @@ PRICE_REF = {}  # prices.py reference + listings seen in the cloud; set in cmd_r
 WARN_DAMAGE = True  # alerts.json "damage": "warn" = damaged listings still notify, flagged ⚠️; "skip" = never
 
 
-def defect_note(r):
-    """Short quote of the first non-negated defect phrase in the title/description, or ''."""
+def defect_note(r, only=None):
+    """Short quote of the first non-negated defect phrase in the title/description, or ''. With `only` (the light
+    damage regex) quote that; otherwise skip light phrases so a heavy listing quotes its heavy fault."""
     text = f"{r.get('title') or ''}. {r.get('desc') or ''}"
-    rxs = [tv.DAMAGE_RX] + [re.compile(x[0], re.I) for x in db.DAMAGE if len(x) > 2 and x[2]]
+    rxs = [only] if only else [tv.DAMAGE_RX] + [re.compile(x[0], re.I) for x in db.DAMAGE if len(x) > 2 and x[2]]
+    light = [] if only else [(m.start(), m.end()) for m in LIGHT_RX.finditer(text)]
     for rx in rxs:
         for m in rx.finditer(text):
             if db.NEG.search(text[max(0, m.start() - 35):m.start()]):
+                continue
+            if any(a < m.end() and m.start() < b for a, b in light):
                 continue
             a = max(text.rfind(".", 0, m.start()) + 1, m.start() - 50)
             if a and not text[a - 1].isspace() and text[a - 1] != ".":
@@ -120,17 +124,25 @@ def match(rule, r, price_factor=1.0):
     return True
 
 
+def price_factor(cfg, r):
+    """Listings only found around the other center (Utrecht) and heavily damaged ones must be bigger steals."""
+    f = 1.0
+    primary = cfg.get("primary_center")
+    if primary and r.get("near") and primary not in r["near"]:
+        f *= cfg.get("other_center_price_factor", 1.0)
+    if severity(r) == "heavy":
+        f *= cfg.get("heavy_damage_price_factor", 0.5)
+    return f
+
+
 def tv_first_rule(cfg, r):
-    """TV rules (alerts.json 'tv'): ≥ min_inch, never damaged / parts / wanted ads."""
+    """TV rules (alerts.json 'tv'): ≥ min_inch, never parts / accessories / wanted ads."""
     t = cfg.get("tv") or {}
     if (r.get("damage") and not WARN_DAMAGE) or r.get("accessory") or not (r.get("inch") and r["inch"] >= t.get("min_inch", 50)):
         return None
     if t.get("none") and re.search(t["none"], f"{r.get('title')} {r.get('desc') or ''}", re.I):
         return None
-    factor = 1.0
-    primary = cfg.get("primary_center")
-    if primary and r.get("near") and primary not in r["near"]:
-        factor = cfg.get("other_center_price_factor", 1.0)
+    factor = price_factor(cfg, r)
     return next((ru for ru in t.get("rules", []) if match(ru, r, factor)), None)
 
 
@@ -148,49 +160,76 @@ def globally_ok(cfg, r):
 def first_rule(cfg, r):
     if not globally_ok(cfg, r):
         return None
-    factor = 1.0
-    primary = cfg.get("primary_center")
-    if primary and r.get("near") and primary not in r["near"]:  # only found around the other center: must be a steal
-        factor = cfg.get("other_center_price_factor", 1.0)
+    factor = price_factor(cfg, r)
     return next((ru for ru in cfg["rules"] if match(ru, r, factor)), None)
 
 
+# ---------------------------------------------------------------- damage: light (acceptable) vs heavy
+LIGHT_RX = re.compile(
+    r"dode? pixels?|pixel ?(fout\w*|defect\w*)|pixelfout\w*|dead pixels?|stuck pixels?|"
+    r"\b(paar|enkele|kleine?|lichte?|witte?)\s+(vlek\w*|stip\w*|plek\w*|puntje\w*)|\bwitte? vlek\w*|"
+    r"clouding|lichtlek\w*|backlight ?bleed\w*|light ?bleed\w*|ips ?glow|\bdeuk(je|jes)?\b|\bdent\b", re.I)
+HEAVY_LABELS = {"roto/grieta", "defecto", "daños", "rayas", "líneas", "parpadeo", "quemado", "zona oscura",
+                "tono de color", "manchas"}
+
+
+def damaged(r):
+    d = r.get("damage")
+    return bool(d) and not (isinstance(d, str) and set(filter(None, d.split(", "))) <= IGNORED_DAMAGE)
+
+
+def severity(r):
+    """None, 'light' (a few dead/white pixels, light bleed, a dent: acceptable) or 'heavy' (scratches, cracks,
+    lines, dark areas, colour faults, not working). The AI's verdict (it also sees the photos) wins when it has one."""
+    a = (r.get("ai") or {}).get("damage")
+    if a in ("light", "heavy"):
+        return a
+    if not damaged(r):
+        return None
+    text = f"{r.get('title') or ''}. {r.get('desc') or ''}"
+    rest = LIGHT_RX.sub(" ", text)
+    if r.get("cond") == tv.NOT_WORKING or tv.has_damage(rest) or set(db.flags(rest, db.DAMAGE)) & HEAVY_LABELS:
+        return "heavy"
+    return "light"
+
+
 def describe(rule, r, tag=""):
-    price = f"€{r['price']:.0f}" if r.get("price") else "sin precio"
-    title = f"{tag or '🔔'} {rule['name']} · {price}"
     spec = " ".join(x for x in [f"{r['inch']:g}\"" if r.get("inch") else "", r.get("res") or "",
                                 f"{r['hz']}Hz" if r.get("hz") else "",
                                 f"USB‑C {r['usbc']}" if re.search(r"\d+W", r.get("usbc") or "") else ""] if x)
     disc = f" · −{r['discount']}%" if r.get("discount") else ""
-    body = f"{r.get('model') or (r.get('title') or '')[:60]}\n{spec}{disc} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}"
-    return warn(title, with_ai(body, r, tag), r)
+    name = r.get("model") or (r.get("title") or "")[:55]
+    body = f"🔔 {rule['name']}\n{spec}{disc} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}"
+    if r.get("model"):
+        body = f"{(r.get('title') or '')[:70]}\n{body}"
+    return finish(name, body, r, tag, "monitor")
 
 
-def with_ai(body, r, tag, kind="monitor"):
-    pl = prices.line(PRICE_REF, r, kind)
-    body = f"{body}\n{pl}" if pl else body
+def describe_tv(rule, r, tag=""):
+    spec = " ".join(x for x in [f"{r['inch']}\"", (r.get("res") or "") + ("?" if r.get("res_guess") else ""), r.get("panel") or "",
+                                "Smart" if r.get("smart") else "", str(r["year"]) if r.get("year") else ""] if x)
+    body = f"📺 {rule['name']}\n{spec} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}"
+    return finish(f"📺 {(r.get('title') or '')[:55]}", body, r, tag, "tv")
+
+
+def finish(name, body, r, tag, kind):
+    """Title 'P98 (€80) name [· 🔴 HEAVY]' + damage line first, then the rule/spec lines, then the AI lines."""
+    price = f"€{r['price']:.0f}" if r.get("price") else "sin precio"
+    title = f"{prices.tag(PRICE_REF, r, kind) or 'P?'} ({price}) {name}"
+    sev = severity(r)
+    if sev:
+        quote = defect_note(r, LIGHT_RX if sev == "light" else None) or (r.get("ai") or {}).get("defects") or ""
+        title += " · 🔴 HEAVY" if sev == "heavy" else " · 🟠 LIGHT"
+        head = "🔴 HEAVILY DAMAGED" if sev == "heavy" else "🟠 LIGHTLY DAMAGED"
+        body = f"{head}{': «' + quote[:110] + '»' if quote else ''}\n{body}"
+    if tag:
+        title += " ❓"
     a = ai.line(r)
     if tag and not a:
         a = "❓ Falta un dato clave (resolución/tamaño) y no se pudo comprobar"
     elif tag:
         a += "\n❓ La IA no lo confirma del todo: míralo"
-    return f"{body}\n{a}" if a else body
-
-
-def warn(title, body, r):
-    d = r.get("damage")
-    if not d or (isinstance(d, str) and set(filter(None, d.split(", "))) <= IGNORED_DAMAGE):
-        return title, body
-    note = defect_note(r) or (d if isinstance(d, str) else "posible defecto o no funciona")
-    return (f"⚠️ {title}", f"{body}\n⚠️ «{note[:110]}»") if note else (title, body)
-
-
-def describe_tv(rule, r, tag=""):
-    price = f"€{r['price']:.0f}" if r.get("price") else "sin precio"
-    spec = " ".join(x for x in [f"{r['inch']}\"", (r.get("res") or "") + ("?" if r.get("res_guess") else ""), r.get("panel") or "",
-                                "Smart" if r.get("smart") else "", str(r["year"]) if r.get("year") else ""] if x)
-    return warn(f"📺{tag} {rule['name']} · {price}",
-                with_ai(f"{(r.get('title') or '')[:60]}\n{spec} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}", r, tag, "tv"), r)
+    return title, f"{body}\n{a}" if a else body
 
 
 def bids(r):
@@ -222,7 +261,7 @@ def verify_hits(cfg, s, hits, tv_kind):
         else:
             r = db.enrich(r)
             ru2 = first_rule(cfg, r)
-        if ru2 or WARN_DAMAGE:  # warn mode: never drop a hit, the push carries the ⚠️ note instead
+        if ru2 or (WARN_DAMAGE and severity(r) != "heavy"):  # warn mode: keep it, the push says LIGHT/HEAVY
             out.append((ru2 or ru, r))
         else:
             s["alerted"][r["id"]] = {"at": now(), "skipped": "full description fails the rules", "rule": ru["name"]}
@@ -296,6 +335,10 @@ def ai_pass(cfg, s, hits, unsure, tv_kind):
                   f"({a.get('confidence')}) · tokens in {u.get('prompt_tokens')} out {u.get('completion_tokens')}")
         ru2 = rule_of(r2)
         if what == "hit":
+            if not ru2 and severity(r2) == "heavy":  # the AI found heavy damage: must cost ≤ 50 % of the limit
+                s["alerted"][r["id"]] = {"at": now(), "skipped": "heavy damage over the 50 % limit", "rule": ru["name"]}
+                log(f"SKIP heavy [{ru['name']}] {r['id']} {r.get('title')!r}: {(a or {}).get('defects')}")
+                continue
             out.append((ru2 or ru, r2, "" if ru2 or not a else "❓"))
             continue
         s.setdefault("ai_checked", {})[r["id"]] = {"at": now(), "ok": bool(ru2), "ai": bool(a)}
@@ -401,14 +444,15 @@ def cmd_run(args):
         return print(f"error: {e!r}; paused {h} h")
     s["pause_until"], s["backoff_h"] = None, 1
     global PRICE_REF
-    hist = s.setdefault("price_hist", {})
+    s.pop("price_hist", None)  # old per-group format
+    hist = s.setdefault("value_hist", {})
     for r in rows:  # every listing seen grows the reference for the percentile
         prices.add(hist, db.enrich(dict({k: None for k in db.COLS}, **r)), "monitor")
     for r in tvs:
         prices.add(hist, r, "tv")
-    for g in hist:  # keep the state small: newest 3000 per group
-        if len(hist[g]) > 3000:
-            hist[g] = dict(list(hist[g].items())[-3000:])
+    for g in hist:  # keep the state small: newest 5000 per kind
+        if len(hist[g]) > 5000:
+            hist[g] = dict(list(hist[g].items())[-5000:])
     PRICE_REF = prices.load(hist)
     if cloud:  # no database in the cloud: rules run on the newest listings only
         pool = [db.enrich(dict({k: None for k in db.COLS}, **r)) for r in rows]
