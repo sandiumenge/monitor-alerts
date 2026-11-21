@@ -79,5 +79,49 @@
     "UWFHD"
    ]
   }
- ]
+ ],
+ "tv": {
+  "_help": "Large TVs (Marktplaats > Audio, Tv en Foto > Televisies), newest page per center. Parsing in tv.py: inch, res (HD/FHD/4K/8K or null = unknown), panel (OLED/QLED/LED/LCD/PLASMA), smart, year. Damaged, parts/accessories and 'gezocht' listings never alert. Same keys as monitor rules plus not_panel [list] and smart (true). Same Utrecht price factor.",
+  "enabled": true,
+  "min_inch": 50,
+  "fetch_max_price": 250,
+  "none": "\\b(gezocht|gevraagd|ruilen)\\b",
+  "rules": [
+   {
+    "name": "QLED/OLED ≥55\"",
+    "panel": ["OLED", "QLED"],
+    "min_inch": 55,
+    "max_price": 175
+   },
+   {
+    "name": "Tele ≥65\"",
+    "res": ["4K", "8K", null],
+    "not_panel": ["PLASMA"],
+    "min_inch": 65,
+    "max_price": 120
+   },
+   {
+    "name": "4K Smart ≥55\"",
+    "res": ["4K", "8K"],
+    "smart": true,
+    "min_inch": 55,
+    "max_price": 120
+   },
+   {
+    "name": "4K ≥50\"",
+    "res": ["4K", "8K"],
+    "max_price": 90
+   },
+   {
+    "name": "Tele ≥50\" barata",
+    "not_panel": ["PLASMA"],
+    "max_price": 50
+   },
+   {
+    "name": "Plasma ≥50\" casi gratis",
+    "panel": ["PLASMA"],
+    "max_price": 15
+   }
+  ]
+ }
 }

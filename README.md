@@ -2,6 +2,7 @@
 
 Checks the newest Marktplaats "Monitoren" listings around Amsterdam and Utrecht every 10 minutes (GitHub Actions)
 and sends a phone push through ntfy when one matches a rule in `alerts.json`.
+It also checks the newest "Televisies" listings for big TVs (≥50") with their own rules (`alerts.json` → `tv`, parsing in `tv.py`).
 
 - Rules: edit `alerts.json` (see its `_help`). Known models, sizes and new prices: `models.json`.
 - Phone push topic: repository secret `NTFY_TOPIC`.
