@@ -46,7 +46,29 @@ def conf():
     cfg = json.loads(RULES_P.read_text(encoding="utf-8"))
     topic_f = hunt.DATA / "ntfy_topic.txt"  # kept out of git; in GitHub Actions it comes from the NTFY_TOPIC secret
     cfg["ntfy_topic"] = os.environ.get("NTFY_TOPIC") or cfg.get("ntfy_topic") or         (topic_f.read_text(encoding="utf-8").strip() if topic_f.exists() else "")
+    global WARN_DAMAGE
+    WARN_DAMAGE = cfg.get("damage", "warn") == "warn"
     return cfg
+
+
+WARN_DAMAGE = True  # alerts.json "damage": "warn" = damaged listings still notify, flagged ⚠️; "skip" = never
+
+
+def defect_note(r):
+    """Short quote of the first non-negated defect phrase in the title/description, or ''."""
+    text = f"{r.get('title') or ''}. {r.get('desc') or ''}"
+    rxs = [tv.DAMAGE_RX] + [re.compile(x[0], re.I) for x in db.DAMAGE if len(x) > 2 and x[2]]
+    for rx in rxs:
+        for m in rx.finditer(text):
+            if db.NEG.search(text[max(0, m.start() - 35):m.start()]):
+                continue
+            a = max(text.rfind(".", 0, m.start()) + 1, m.start() - 50)
+            if a and not text[a - 1].isspace() and text[a - 1] != ".":
+                a = text.find(" ", a, m.start()) + 1 or a  # don't start mid-word
+            b = text.find(".", m.end())
+            b = min(b if b != -1 else len(text), m.end() + 60)
+            return text[a:b].strip()
+    return ""
 
 
 # ---------------------------------------------------------------- rules
@@ -84,7 +106,7 @@ def match(rule, r, price_factor=1.0):
         return False
     if "none" in rule and re.search(rule["none"], text, re.I):
         return False
-    if rule.get("no_damage") and set(filter(None, (r.get("damage") or "").split(", "))) - IGNORED_DAMAGE:
+    if rule.get("no_damage") and not WARN_DAMAGE and set(filter(None, (r.get("damage") or "").split(", "))) - IGNORED_DAMAGE:
         return False
     if "max_km" in rule and (r.get("km") or 0) > rule["max_km"]:
         return False
@@ -98,7 +120,7 @@ def match(rule, r, price_factor=1.0):
 def tv_first_rule(cfg, r):
     """TV rules (alerts.json 'tv'): ≥ min_inch, never damaged / parts / wanted ads."""
     t = cfg.get("tv") or {}
-    if r.get("damage") or r.get("accessory") or not (r.get("inch") and r["inch"] >= t.get("min_inch", 50)):
+    if (r.get("damage") and not WARN_DAMAGE) or r.get("accessory") or not (r.get("inch") and r["inch"] >= t.get("min_inch", 50)):
         return None
     if t.get("none") and re.search(t["none"], f"{r.get('title')} {r.get('desc') or ''}", re.I):
         return None
@@ -138,15 +160,23 @@ def describe(rule, r):
                                 f"USB‑C {r['usbc']}" if re.search(r"\d+W", r.get("usbc") or "") else ""] if x)
     disc = f" · −{r['discount']}%" if r.get("discount") else ""
     body = f"{r.get('model') or (r.get('title') or '')[:60]}\n{spec}{disc} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}"
-    return title, body
+    return warn(title, body, r)
+
+
+def warn(title, body, r):
+    d = r.get("damage")
+    if not d or (isinstance(d, str) and set(filter(None, d.split(", "))) <= IGNORED_DAMAGE):
+        return title, body
+    note = defect_note(r) or (d if isinstance(d, str) else "posible defecto o no funciona")
+    return (f"⚠️ {title}", f"{body}\n⚠️ «{note[:110]}»") if note else (title, body)
 
 
 def describe_tv(rule, r):
     price = f"€{r['price']:.0f}" if r.get("price") else "sin precio"
     spec = " ".join(x for x in [f"{r['inch']}\"", r.get("res") or "", r.get("panel") or "",
                                 "Smart" if r.get("smart") else "", str(r["year"]) if r.get("year") else ""] if x)
-    return (f"📺 {rule['name']} · {price}",
-            f"{(r.get('title') or '')[:60]}\n{spec} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}")
+    return warn(f"📺 {rule['name']} · {price}",
+                f"{(r.get('title') or '')[:60]}\n{spec} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}", r)
 
 
 def bids(r):
@@ -177,8 +207,8 @@ def verify_hits(cfg, s, hits, tv_kind):
         else:
             r = db.enrich(r)
             ru2 = first_rule(cfg, r)
-        if ru2:
-            out.append((ru2, r))
+        if ru2 or WARN_DAMAGE:  # warn mode: never drop a hit, the push carries the ⚠️ note instead
+            out.append((ru2 or ru, r))
         else:
             s["alerted"][r["id"]] = {"at": now(), "skipped": "full description fails the rules", "rule": ru["name"]}
             log(f"SKIP [{ru['name']}] {r['id']} {r.get('title')!r}: full description fails ({r.get('damage')})")

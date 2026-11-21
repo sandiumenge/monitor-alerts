@@ -1,5 +1,5 @@
 {
- "_help": "Each rule: name + any of min_inch, max_inch, min_inch_if_known (skip only when the size is known and smaller), max_price, res / not_res [list, e.g. UWQHD/4K/QHD/UWFHD], panel [list], min_hz, usbc_charge (true), min_discount (%), models (regex on model/title/description), any (regex that must appear), none (regex that must NOT appear), no_damage (true), max_km, allow_no_price (true = also listings without a price). A listing fires the first rule it matches. Test changes with: python -I alert.py test Global: min_inch drops listings whose known size is smaller; exclude_title skips accessory-only titles unless exclude_title_unless also matches. Phone push topic: data/ntfy_topic.txt locally, NTFY_TOPIC secret in GitHub Actions. Listings found only around a non-primary center (Utrecht) must cost at most other_center_price_factor x the rule's max_price.",
+ "_help": "Each rule: name + any of min_inch, max_inch, min_inch_if_known (skip only when the size is known and smaller), max_price, res / not_res [list, e.g. UWQHD/4K/QHD/UWFHD], panel [list], min_hz, usbc_charge (true), min_discount (%), models (regex on model/title/description), any (regex that must appear), none (regex that must NOT appear), no_damage (true; ignored while global damage = warn), max_km, allow_no_price (true = also listings without a price). A listing fires the first rule it matches. Test changes with: python -I alert.py test Global: min_inch drops listings whose known size is smaller; exclude_title skips accessory-only titles unless exclude_title_unless also matches. Phone push topic: data/ntfy_topic.txt locally, NTFY_TOPIC secret in GitHub Actions. Listings found only around a non-primary center (Utrecht) must cost at most other_center_price_factor x the rule's max_price.",
  "every_minutes": 10,
  "quiet_hours": [
   1,
@@ -7,6 +7,7 @@
  ],
  "max_toasts": 4,
  "min_inch": 28,
+ "damage": "warn",
  "exclude_title": "\\b(monitor ?)?(standaard|stand|voet|voetje|houder|beugel|lightbar|lamp|arm)\\b|monitorstandaard|monitorarm",
  "exclude_title_unless": "\\bmet\\b|\\bincl|\\+|\\b\\d{2}([.,]\\d)? ?(inch|\\\"|”|duim)",
  "primary_center": "Amsterdam",
@@ -81,7 +82,7 @@
   }
  ],
  "tv": {
-  "_help": "Large TVs (Marktplaats > Audio, Tv en Foto > Televisies), newest page per center. Parsing in tv.py: inch, res (HD/FHD/4K/8K or null = unknown), panel (OLED/QLED/LED/LCD/PLASMA), smart, year. Damaged, parts/accessories and 'gezocht' listings never alert. Same keys as monitor rules plus not_panel [list] and smart (true). Same Utrecht price factor.",
+  "_help": "Large TVs (Marktplaats > Audio, Tv en Foto > Televisies), newest page per center. Parsing in tv.py: inch, res (HD/FHD/4K/8K or null = unknown), panel (OLED/QLED/LED/LCD/PLASMA), smart, year. Damaged listings alert with a ⚠️ quote of the defect (global \"damage\": \"warn\"; \"skip\" drops them); parts/accessories and 'gezocht' listings never alert. Same keys as monitor rules plus not_panel [list] and smart (true). Same Utrecht price factor.",
   "enabled": true,
   "min_inch": 50,
   "fetch_max_price": 250,
