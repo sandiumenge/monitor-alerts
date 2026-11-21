@@ -120,7 +120,7 @@ def sweep(max_eur=300):
         for lo, hi in bands:
             for page in range(15):
                 p = {"l1CategoryId": L1, "l2CategoryIds": L2, "limit": 100, "offset": page * 100, "postcode": pc,
-                     "distanceMeters": hunt.CFG["radius_km"] * 1000, "viewOptions": "list-view",
+                     "distanceMeters": hunt.radius_m(city), "viewOptions": "list-view",
                      "sortBy": "SORT_INDEX", "sortOrder": "DECREASING",
                      "attributeRanges[]": f"PriceCents:{lo if lo is not None else 'null'}:{hi}"}
                 j = hunt.mp_get(p)

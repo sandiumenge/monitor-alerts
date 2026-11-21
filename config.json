@@ -3,6 +3,10 @@
  "max_inch": 49,
  "max_price": 200,
  "radius_km": 25,
+ "radius_by_center": {
+  "Amsterdam": 15,
+  "Utrecht": 6
+ },
  "centers": {
   "Amsterdam": "1012AB",
   "Utrecht": "3511AA"

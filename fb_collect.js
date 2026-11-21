@@ -1,5 +1,5 @@
 // Facebook Marketplace collector. Runs inside a logged-in FB search page (built-in browser).
-// Search URL: https://www.facebook.com/marketplace/amsterdam/search?query=<q>&maxPrice=200&daysSinceListed=7&sortBy=creation_time_descend&radius=25&exact=false
+// Search URL: https://www.facebook.com/marketplace/amsterdam/search?query=<q>&maxPrice=200&daysSinceListed=7&sortBy=creation_time_descend&radius=15&exact=false
 // Per query, inline this whole file (FB's CSP blocks eval) and then:
 //   JSON.stringify(await mhRun({tag:'<q>', scrolls:15, maxPrice:200, towns:'<config.local_towns>', reset:<true on first query>}))
 // At the end: JSON.stringify(Object.values(JSON.parse(localStorage.getItem('mh_fb_run'))))

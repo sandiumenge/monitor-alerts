@@ -203,7 +203,7 @@ def cmd_sync(args):
         for s in searches:
             for page in range(15):
                 try:
-                    j = hunt.mp_get(dict(base, **s, postcode=pc, offset=page * 100))
+                    j = hunt.mp_get(dict(base, **s, postcode=pc, offset=page * 100, distanceMeters=hunt.radius_m(city)))
                 except Exception as e:  # noqa: BLE001
                     print(f"  ! {city} {s} offset {page * 100}: {e}")
                     errors += 1

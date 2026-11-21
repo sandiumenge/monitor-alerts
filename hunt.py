@@ -22,6 +22,11 @@ ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
 DATA.mkdir(exist_ok=True)
 CFG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+
+
+def radius_m(city):
+    """Search radius around a center in meters (config radius_by_center, else radius_km)."""
+    return int(CFG.get("radius_by_center", {}).get(city, CFG["radius_km"]) * 1000)
 TODAY = dt.date.today()
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 
@@ -109,7 +114,7 @@ def cmd_mp(args):
     for city, pc in CFG["centers"].items():
         for s in searches:
             for page in range(20):
-                p = dict(base, **s, postcode=pc, offset=page * 100)
+                p = dict(base, **s, postcode=pc, offset=page * 100, distanceMeters=radius_m(city))
                 try:
                     j = mp_get(p)
                 except Exception as e:  # noqa: BLE001

@@ -249,7 +249,7 @@ def fetch_newest():
     for i, (city, pc) in enumerate(hunt.CFG["centers"].items()):
         if i:
             time.sleep(random.uniform(3, 6))
-        j = hunt.mp_get(dict(base, postcode=pc))
+        j = hunt.mp_get(dict(base, postcode=pc, distanceMeters=hunt.radius_m(city)))
         for x in j.get("listings") or []:
             r = hunt.mp_row(x)
             r["near"] = city
@@ -274,7 +274,7 @@ def fetch_tvs(cfg):
     for city, pc in hunt.CFG["centers"].items():
         time.sleep(random.uniform(3, 6))
         j = hunt.mp_get({"l1CategoryId": tv.L1, "l2CategoryIds": tv.L2, "limit": 100, "offset": 0, "postcode": pc,
-                         "distanceMeters": hunt.CFG["radius_km"] * 1000, "viewOptions": "list-view",
+                         "distanceMeters": hunt.radius_m(city), "viewOptions": "list-view",
                          "sortBy": "SORT_INDEX", "sortOrder": "DECREASING", "attributeRanges[]": f"PriceCents:null:{mx * 100}"})
         for x in j.get("listings") or []:
             r = hunt.mp_row(x)
