@@ -24,7 +24,10 @@ SYSTEM = (
     "You check second-hand listings from Marktplaats (Netherlands) for a buyer. Identify the exact product model "
     "from the title, description and photos (labels, stickers, remote, stand, logos). If the model is known or can be "
     "narrowed down, search the web for its specs and for its current new price in the Netherlands/EU (or its last "
-    "price when it was sold new, if discontinued). Never invent: use null when unknown. Answer with ONE JSON object "
+    "price when it was sold new, if discontinued). If the exact model cannot be found, still give the MOST LIKELY "
+    "resolution, panel, Smart and new price for that brand, size, year and range (e.g. which Ambilight 55\" models "
+    "Philips sold that year) and set confidence to media or baja; use null only when there is no basis at all. "
+    "Answer with ONE JSON object "
     "and nothing else, with these keys:\n"
     '{"model": str|null, "inch": number|null, "res": "HD"|"FHD"|"QHD"|"UWFHD"|"UWQHD"|"4K"|"5K2K"|"8K"|null, '
     '"panel": "OLED"|"QLED"|"LED"|"LCD"|"PLASMA"|"IPS"|"VA"|"TN"|null, "smart": bool|null, "hz": int|null, '
@@ -93,7 +96,7 @@ def apply(r, a, kind):
         if v in (None, ""):
             continue
         if f == "res" and r.get("res_guess"):
-            r["res"], r["res_guess"] = v, False  # replace our year-based guess
+            r["res"], r["res_guess"] = v, a.get("confidence") != "alta"  # replace our year-based guess
         elif not r.get(f):
             r[f] = v
     if kind != "tv":
