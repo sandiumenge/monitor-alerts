@@ -638,8 +638,11 @@ def cmd_toast(args):
 
 def cmd_ping(args):
     cfg = conf()
-    ok = notify.ntfy(cfg.get("ntfy_topic"), "🔔 Prueba desde la nube",
-                     "Las alertas de monitores funcionan desde GitHub Actions.", "https://www.marktplaats.nl")
+    ok = notify.ntfy(cfg.get("ntfy_topic"), "P97 (€75) Iiyama XUB3493WQSU-B1 · 🟠 LIGHT",
+                     "🟠 LIGHTLY DAMAGED: «2 dode pixels rechtsboven, verder perfect»\n"
+                     "🔔 Ultrawide 34–35\" (con o sin USB‑C)\n34\" UWQHD 75Hz · −77% · Amsterdam 3 km\n"
+                     "🤖 Iiyama ProLite XUB3493WQSU-B1 · UWQHD IPS 2019 · nuevo ~€330 (−77 %)\n"
+                     "🤖 (EJEMPLO de prueba, no es un anuncio real)", "https://www.marktplaats.nl")
     print("phone push sent" if ok else "phone push FAILED (is NTFY_TOPIC set?)")
 
 
