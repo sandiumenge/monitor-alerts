@@ -49,8 +49,10 @@ def conf():
     cfg = json.loads(RULES_P.read_text(encoding="utf-8"))
     topic_f = hunt.DATA / "ntfy_topic.txt"  # kept out of git; in GitHub Actions it comes from the NTFY_TOPIC secret
     cfg["ntfy_topic"] = os.environ.get("NTFY_TOPIC") or cfg.get("ntfy_topic") or         (topic_f.read_text(encoding="utf-8").strip() if topic_f.exists() else "")
-    # TVs go to their own topic (own thread in the ntfy app): same private name + "-tv", unless NTFY_TOPIC_TV is set
-    cfg["ntfy_topic_tv"] = os.environ.get("NTFY_TOPIC_TV") or (cfg["ntfy_topic"] + "-tv" if cfg["ntfy_topic"] else "")
+    # TVs go to their own topic (own thread in the ntfy app): "monitores-<id>" -> "tv-<id>", unless NTFY_TOPIC_TV is set
+    t = cfg["ntfy_topic"]
+    cfg["ntfy_topic_tv"] = os.environ.get("NTFY_TOPIC_TV") or (
+        ("tv-" + t[len("monitores-"):] if t.startswith("monitores-") else t + "-tv") if t else "")
     global WARN_DAMAGE
     WARN_DAMAGE = cfg.get("damage", "warn") == "warn"
     return cfg
