@@ -137,7 +137,7 @@ def describe(rule, r):
                                 f"{r['hz']}Hz" if r.get("hz") else "",
                                 f"USB‑C {r['usbc']}" if re.search(r"\d+W", r.get("usbc") or "") else ""] if x)
     disc = f" · −{r['discount']}%" if r.get("discount") else ""
-    body = f"{r.get('model') or (r.get('title') or '')[:60]}\n{spec}{disc} · {r.get('city') or '?'} {r.get('km') or 0} km"
+    body = f"{r.get('model') or (r.get('title') or '')[:60]}\n{spec}{disc} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}"
     return title, body
 
 
@@ -145,7 +145,45 @@ def describe_tv(rule, r):
     price = f"€{r['price']:.0f}" if r.get("price") else "sin precio"
     spec = " ".join(x for x in [f"{r['inch']}\"", r.get("res") or "", r.get("panel") or "",
                                 "Smart" if r.get("smart") else "", str(r["year"]) if r.get("year") else ""] if x)
-    return f"📺 {rule['name']} · {price}", f"{(r.get('title') or '')[:60]}\n{spec} · {r.get('city') or '?'} {r.get('km') or 0} km"
+    return (f"📺 {rule['name']} · {price}",
+            f"{(r.get('title') or '')[:60]}\n{spec} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}")
+
+
+def bids(r):
+    return f" · {r['n_bids']} pujas (máx €{r['top_bid']:.0f})" if r.get("n_bids") and r.get("top_bid") else ""
+
+
+def verify_hits(cfg, s, hits, tv_kind):
+    """Before notifying, read the full listing: the search API only returns the first ~250 characters of the
+    description, and defects ("valt donkerder uit", "krassen") are often further down. A hit whose full text
+    no longer passes its rules is marked as handled without a push. A failed fetch keeps the hit (better a push
+    than a miss); a 404/410 means it is already gone."""
+    out = []
+    for i, (ru, r) in enumerate(hits):
+        if i:
+            time.sleep(random.uniform(2, 4))
+        try:
+            d = db.fetch_details(r["url"])
+        except Exception as e:  # noqa: BLE001
+            if "404" in str(e) or "410" in str(e):
+                s["alerted"][r["id"]] = {"at": now(), "skipped": "gone"}
+                continue
+            out.append((ru, r))
+            continue
+        r = dict(r, desc=d["desc"] or r.get("desc"), n_bids=d["n_bids"], top_bid=d["top_bid"], views=d["views"])
+        if tv_kind:
+            r = tv.parse(r)
+            ru2 = tv_first_rule(cfg, r)
+        else:
+            r = db.enrich(r)
+            ru2 = first_rule(cfg, r)
+        if ru2:
+            out.append((ru2, r))
+        else:
+            s["alerted"][r["id"]] = {"at": now(), "skipped": "full description fails the rules", "rule": ru["name"]}
+            log(f"SKIP [{ru['name']}] {r['id']} {r.get('title')!r}: full description fails ({r.get('damage')})")
+            print(f"  SKIP [{ru['name']}] {r.get('title')!r}: {r.get('damage')} · {r['url']}")
+    return out
 
 
 # ---------------------------------------------------------------- state
@@ -263,6 +301,7 @@ def cmd_run(args):
         if ru:
             hits.append((ru, r))
     hits.sort(key=lambda h: rules.index(h[0]))
+    hits = verify_hits(cfg, s, hits, tv_kind=False)
     shown = 0
     for ru, r in hits:
         title, body = describe(ru, r)
@@ -279,6 +318,7 @@ def cmd_run(args):
     tv_rules = (cfg.get("tv") or {}).get("rules", [])
     tv_hits = [(ru, r) for r in tvs if r["id"] not in s["alerted"] and (ru := tv_first_rule(cfg, r))]
     tv_hits.sort(key=lambda h: tv_rules.index(h[0]))
+    tv_hits = verify_hits(cfg, s, tv_hits, tv_kind=True)
     for ru, r in tv_hits:
         title, body = describe_tv(ru, r)
         if shown < cfg.get("max_toasts", 4):

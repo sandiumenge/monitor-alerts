@@ -67,6 +67,10 @@ DAMAGE = [  # (regex, label, check negation before it)
     (r"flikker\w*|flicker\w*", "parpadeo", True),
     (r"\bdeuk(je|jes)?\b|\bdent\b|\bdeukje", "abolladura", True),
     (r"inbrand\w*|burn-?in", "quemado", True),
+    (r"donker\w* (baan|band|balk|plek|rand|strook|gedeelte|schaduw)|valt .{0,30}donker|donkerder|backlight|"
+     r"dark (area|band|spot|patch|corner)", "zona oscura", True),
+    (r"slaat .{0,25}(groen|roze|paars|rood|blauw)|(groen|roze|paars)e? (waas|zweem|gloed|tint)|kleurafwijking|"
+     r"paneelslijtage|color (tint|shift)", "tono de color", True),
     (r"(zonder|geen|exclusief|excl\.?) (voet|standaard|stand)\b|voet (ontbreekt|mist)|without stand|no stand", "sin pie", False),
     (r"(zonder|geen|exclusief|excl\.?) (stroom|voedings)?(kabel|adapter|lader|voeding)|adapter ontbreekt|no power (cable|adapter)", "sin cable/fuente", False),
 ]

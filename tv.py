@@ -12,6 +12,7 @@ import statistics
 import sys
 import time
 
+import db
 import hunt
 
 L1, L2 = 31, 1120
@@ -31,6 +32,9 @@ SMART_RX = re.compile(r"smart|android|google tv|webos|tizen|netflix|youtube|wifi
 DAMAGE_RX = re.compile(r"kapot|defect|stuk\b|gebroken|barst|scheur|streep|strepen|lijn(en)? in|vlek|backlight|"
                        r"geen beeld|doet het niet|niet werkend|onderdelen|voor parts|parts|reparatie|beschadig|schade|\bgebrek(en)?\b|blauw\w* scherm|scherm (vervang|kapot)\w*|af en toe|"
                        r"afwijking|gefixt|fixen|repareren|moet gemaakt|inbrand|"
+                       r"donker\w* (baan|band|balk|vlek|plek|rand|strook|gedeelte|schaduw)|valt .{0,30}donker|donkerder|"
+                       r"kras\w*|scratch\w*|slaat .{0,25}(groen|roze|paars|rood|blauw)|(groen|roze|paars)e? (waas|zweem|gloed)|"
+                       r"licht\w* (plek|vlek)\w*|witte vlek|clouding|lichtlek|lekt licht|paneelslijtage|"
                        r"burn.?in|dode pixel|pixel(fout|s? defect)|flikker|knippert|start niet|gaat (steeds )?uit", re.I)
 ACCESSORY_RX = re.compile(r"^(?!.*\b(tv|televisie)\b.*\b(met|incl|inclusief)\b).*\b(muurbeugel|beugel|wandbeugel|"
                           r"standaard|voet(en)?|afstandsbediening|remote|meubel|kast|tv-?kast|tv-?meubel|soundbar|"
@@ -45,6 +49,11 @@ SAMSUNG_YEAR = {"H": 2014, "J": 2015, "K": 2016, "KU": 2016, "M": 2017, "MU": 20
 LG_YEAR = {"UH": 2016, "UJ": 2017, "UK": 2018, "UM": 2019, "UN": 2020, "NANO": None, "UP": 2021, "UQ": 2022, "UR": 2023,
            "UT": 2024, "B6": 2016, "C6": 2016, "B7": 2017, "C7": 2017, "B8": 2018, "C8": 2018, "B9": 2019, "C9": 2019,
            "BX": 2020, "CX": 2020, "B1": 2021, "C1": 2021, "A1": 2021, "B2": 2022, "C2": 2022, "B3": 2023, "C3": 2023}
+
+
+def has_damage(text):
+    """A damage word counts unless negated just before it ("geen krassen", "no scratches")."""
+    return any(not db.NEG.search(text[max(0, m.start() - 35):m.start()]) for m in DAMAGE_RX.finditer(text))
 
 
 def first(rx_list, text):
@@ -98,7 +107,7 @@ def parse(r):
     b = re.search(rf"\b({BRANDS})\b", text, re.I) or re.search(rf"\b({BRANDS})\b", a.get("brand", ""), re.I)
     r["brand"] = b.group(1).lower() if b else (a.get("brand") or "").lower() or None
     r["cond"] = a.get("condition")
-    r["damage"] = bool(DAMAGE_RX.search(text)) or r["cond"] == NOT_WORKING
+    r["damage"] = has_damage(text) or r["cond"] == NOT_WORKING
     r["accessory"] = bool(ACCESSORY_RX.search(r["title"]))
     return r
 
