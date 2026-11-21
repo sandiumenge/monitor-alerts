@@ -25,6 +25,7 @@ import db  # noqa: E402
 import hunt  # noqa: E402
 import ai  # noqa: E402
 import notify  # noqa: E402
+import prices  # noqa: E402
 import tv  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent
@@ -52,6 +53,7 @@ def conf():
     return cfg
 
 
+PRICE_REF = {}  # prices.py reference + listings seen in the cloud; set in cmd_run / cmd_test
 WARN_DAMAGE = True  # alerts.json "damage": "warn" = damaged listings still notify, flagged ⚠️; "skip" = never
 
 
@@ -164,7 +166,9 @@ def describe(rule, r, tag=""):
     return warn(title, with_ai(body, r, tag), r)
 
 
-def with_ai(body, r, tag):
+def with_ai(body, r, tag, kind="monitor"):
+    pl = prices.line(PRICE_REF, r, kind)
+    body = f"{body}\n{pl}" if pl else body
     a = ai.line(r)
     if tag and not a:
         a = "❓ Falta un dato clave (resolución/tamaño) y no se pudo comprobar"
@@ -186,7 +190,7 @@ def describe_tv(rule, r, tag=""):
     spec = " ".join(x for x in [f"{r['inch']}\"", (r.get("res") or "") + ("?" if r.get("res_guess") else ""), r.get("panel") or "",
                                 "Smart" if r.get("smart") else "", str(r["year"]) if r.get("year") else ""] if x)
     return warn(f"📺{tag} {rule['name']} · {price}",
-                with_ai(f"{(r.get('title') or '')[:60]}\n{spec} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}", r, tag), r)
+                with_ai(f"{(r.get('title') or '')[:60]}\n{spec} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}", r, tag, "tv"), r)
 
 
 def bids(r):
@@ -396,6 +400,16 @@ def cmd_run(args):
         log(f"ERROR {e!r}; pausing {h} h")
         return print(f"error: {e!r}; paused {h} h")
     s["pause_until"], s["backoff_h"] = None, 1
+    global PRICE_REF
+    hist = s.setdefault("price_hist", {})
+    for r in rows:  # every listing seen grows the reference for the percentile
+        prices.add(hist, db.enrich(dict({k: None for k in db.COLS}, **r)), "monitor")
+    for r in tvs:
+        prices.add(hist, r, "tv")
+    for g in hist:  # keep the state small: newest 3000 per group
+        if len(hist[g]) > 3000:
+            hist[g] = dict(list(hist[g].items())[-3000:])
+    PRICE_REF = prices.load(hist)
     if cloud:  # no database in the cloud: rules run on the newest listings only
         pool = [db.enrich(dict({k: None for k in db.COLS}, **r)) for r in rows]
         prev = set(s.get("seen_ids", []))
@@ -539,6 +553,8 @@ def summary(cfg, pool, new_rows, hits, s):
 
 def cmd_test(args):
     cfg, c = conf(), db.con()
+    global PRICE_REF
+    PRICE_REF = prices.load()
     rules = cfg["rules"]
     by = {ru["name"]: [] for ru in rules}
     for r in active_rows(c):

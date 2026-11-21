@@ -34,7 +34,7 @@ SYSTEM = (
     '"year": int|null, "usbc_w": int|null, "new_price_eur": number|null, "confidence": "alta"|"media"|"baja", '
     '"defects": str|null, "note": str}\n'
     "usbc_w = USB-C power delivery in watts (monitors only). defects = any damage or fault the seller mentions or "
-    "the photos show, in Spanish, short. note = one short sentence in Spanish for the buyer (max 90 characters): "
+    "the photos show, in Spanish, short; null when there is none. note = one short sentence in Spanish for the buyer (max 90 characters): "
     "what it is and whether the price is good."
 )
 
@@ -127,7 +127,7 @@ def line(r):
     s = "🤖 " + " · ".join(p for p in parts if p)
     if a.get("note"):
         s += f"\n🤖 {a['note'][:110]}"
-    if a.get("defects") and not r.get("damage"):
+    if a.get("defects") and not r.get("damage") and not re.match(r"(ninguno|ninguna|no |sin |none|nada)", a["defects"], re.I):
         s += f"\n⚠️ IA: {a['defects'][:100]}"
     return s
 
