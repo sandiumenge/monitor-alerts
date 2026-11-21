@@ -6,7 +6,7 @@
   7
  ],
  "max_toasts": 4,
- "min_inch": 28,
+ "min_inch": 31,
  "damage": "warn",
  "exclude_title": "\\b(monitor ?)?(standaard|stand|voet|voetje|houder|beugel|lightbar|lamp|arm)\\b|monitorstandaard|monitorarm",
  "exclude_title_unless": "\\bmet\\b|\\bincl|\\+|\\b\\d{2}([.,]\\d)? ?(inch|\\\"|”|duim)",
@@ -71,8 +71,8 @@
    "no_damage": true
   },
   {
-   "name": "Chollo (≥28\", −70 %)",
-   "min_inch": 28,
+   "name": "Chollo (≥31\", −70 %)",
+   "min_inch": 31,
    "min_discount": 70,
    "max_price": 150,
    "no_damage": true,
