@@ -101,6 +101,7 @@ def parse(r):
         r["year"] = r["year"] if r["year"] and r["year"] <= 2014 else None
     elif not r["res"] and r["year"] and r["year"] >= 2017 and (r["inch"] or 0) >= 50:
         r["res"] = "4K"  # practically every 50"+ TV since 2017 is 4K
+        r["res_guess"] = True  # inferred, not stated: the AI check (ai.py) confirms it
     r["smart"] = not re.search(r"geen smart|niet smart|no smart|not smart", text, re.I) and bool(SMART_RX.search(text) or "smarttv" in str(a.get("properties", "")).lower())
     hz = re.search(r"(100|120|144)\s*hz", text, re.I)
     r["hz"] = int(hz.group(1)) if hz else (int(a["refreshRate"].split()[0]) if a.get("refreshRate") not in (None, "50 Hz") else None)

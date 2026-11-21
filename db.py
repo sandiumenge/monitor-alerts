@@ -261,7 +261,10 @@ def fetch_details(url):
     desc = re.sub(r"<[^>]+>", " ", html.unescape(raw))
     desc = re.sub(r"^\s*Beschrijving\s*", "", re.sub(r"\s+", " ", desc)).strip()
     return {"desc": desc, "n_bids": len(bids), "top_bid": max((b.get("value", 0) for b in bids), default=0) / 100 or None,
-            "views": st.get("viewCount"), "favs": st.get("favoritedCount")}
+            "views": st.get("viewCount"), "favs": st.get("favoritedCount"), "title": L.get("title"),
+            "price": ((L.get("priceInfo") or {}).get("priceCents") or 0) / 100 or None,
+            "imgs": ["https:" + u.replace("$_#", "$_83") if u.startswith("//") else u.replace("$_#", "$_83")
+                     for u in ((L.get("gallery") or {}).get("imageUrls") or [])[:3]]}
 
 
 def cmd_details(args):
@@ -288,7 +291,7 @@ def cmd_details(args):
                 c.execute("UPDATE listings SET active=0 WHERE id=?", (t["id"],))
             continue
         r = dict(t)
-        r.update(d, details_at=TODAY)
+        r.update({k: v for k, v in d.items() if k not in ("title", "price", "imgs")}, details_at=TODAY)
         r = enrich(r)
         write(c, r)
         ok += 1

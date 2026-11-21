@@ -8,13 +8,17 @@ on:
         description: Only send a test notification to the phone
         type: boolean
         default: false
+      ai_test_url:
+        description: Only run the AI check on this Marktplaats listing URL and print the answer
+        type: string
+        default: ""
 concurrency:
   group: alerts
   cancel-in-progress: false
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     env:
       TZ: Europe/Amsterdam
     steps:
@@ -25,10 +29,18 @@ jobs:
           path: data/alert_state.json
           key: alert-state-${{ github.run_id }}
           restore-keys: alert-state-
+      - name: AI check of one listing
+        if: inputs.ai_test_url != ''
+        run: python3 -I ai.py "$URL"
+        env:
+          URL: ${{ inputs.ai_test_url }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       - name: Check Marktplaats and push matches
+        if: inputs.ai_test_url == ''
         run: python3 -I alert.py ${{ inputs.test_push && 'ping' || 'run --cloud' }}
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       - name: Save state
         if: always()
         uses: actions/cache/save@v4

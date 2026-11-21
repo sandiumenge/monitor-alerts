@@ -94,6 +94,7 @@ def mp_row(x):
         "city": clean(loc.get("cityName", "")), "km": round((loc.get("distanceMeters") or 0) / 1000),
         "date": d.isoformat() if d else x.get("date"), "url": "https://www.marktplaats.nl" + vip,
         "attrs": attrs, "cat": x.get("categoryId"),
+        "imgs": [p["largeUrl"] for p in (x.get("pictures") or []) if p.get("largeUrl")][:3],  # for the AI check
     }
 
 

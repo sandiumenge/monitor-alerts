@@ -23,6 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import db  # noqa: E402
 import hunt  # noqa: E402
+import ai  # noqa: E402
 import notify  # noqa: E402
 import tv  # noqa: E402
 
@@ -152,15 +153,24 @@ def first_rule(cfg, r):
     return next((ru for ru in cfg["rules"] if match(ru, r, factor)), None)
 
 
-def describe(rule, r):
+def describe(rule, r, tag=""):
     price = f"€{r['price']:.0f}" if r.get("price") else "sin precio"
-    title = f"🔔 {rule['name']} · {price}"
+    title = f"{tag or '🔔'} {rule['name']} · {price}"
     spec = " ".join(x for x in [f"{r['inch']:g}\"" if r.get("inch") else "", r.get("res") or "",
                                 f"{r['hz']}Hz" if r.get("hz") else "",
                                 f"USB‑C {r['usbc']}" if re.search(r"\d+W", r.get("usbc") or "") else ""] if x)
     disc = f" · −{r['discount']}%" if r.get("discount") else ""
     body = f"{r.get('model') or (r.get('title') or '')[:60]}\n{spec}{disc} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}"
-    return warn(title, body, r)
+    return warn(title, with_ai(body, r, tag), r)
+
+
+def with_ai(body, r, tag):
+    a = ai.line(r)
+    if tag and not a:
+        a = "❓ Falta un dato clave (resolución/tamaño) y no se pudo comprobar"
+    elif tag:
+        a += "\n❓ La IA no lo confirma del todo: míralo"
+    return f"{body}\n{a}" if a else body
 
 
 def warn(title, body, r):
@@ -171,12 +181,12 @@ def warn(title, body, r):
     return (f"⚠️ {title}", f"{body}\n⚠️ «{note[:110]}»") if note else (title, body)
 
 
-def describe_tv(rule, r):
+def describe_tv(rule, r, tag=""):
     price = f"€{r['price']:.0f}" if r.get("price") else "sin precio"
-    spec = " ".join(x for x in [f"{r['inch']}\"", r.get("res") or "", r.get("panel") or "",
+    spec = " ".join(x for x in [f"{r['inch']}\"", (r.get("res") or "") + ("?" if r.get("res_guess") else ""), r.get("panel") or "",
                                 "Smart" if r.get("smart") else "", str(r["year"]) if r.get("year") else ""] if x)
-    return warn(f"📺 {rule['name']} · {price}",
-                f"{(r.get('title') or '')[:60]}\n{spec} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}", r)
+    return warn(f"📺{tag} {rule['name']} · {price}",
+                with_ai(f"{(r.get('title') or '')[:60]}\n{spec} · {r.get('city') or '?'} {r.get('km') or 0} km{bids(r)}", r, tag), r)
 
 
 def bids(r):
@@ -200,7 +210,8 @@ def verify_hits(cfg, s, hits, tv_kind):
                 continue
             out.append((ru, r))
             continue
-        r = dict(r, desc=d["desc"] or r.get("desc"), n_bids=d["n_bids"], top_bid=d["top_bid"], views=d["views"])
+        r = dict(r, desc=d["desc"] or r.get("desc"), n_bids=d["n_bids"], top_bid=d["top_bid"], views=d["views"],
+                 imgs=r.get("imgs") or d.get("imgs"))
         if tv_kind:
             r = tv.parse(r)
             ru2 = tv_first_rule(cfg, r)
@@ -213,6 +224,83 @@ def verify_hits(cfg, s, hits, tv_kind):
             s["alerted"][r["id"]] = {"at": now(), "skipped": "full description fails the rules", "rule": ru["name"]}
             log(f"SKIP [{ru['name']}] {r['id']} {r.get('title')!r}: full description fails ({r.get('damage')})")
             print(f"  SKIP [{ru['name']}] {r.get('title')!r}: {r.get('damage')} · {r['url']}")
+    return out
+
+
+# ---------------------------------------------------------------- AI second opinion (ai.py, DeepSeek)
+GUESS_INCH = {"UWQHD": 34, "5K2K": 34, "4K": 32, "QHD": 32}
+
+
+def maybe_rule(cfg, r, tv_kind):
+    """A rule the listing would match if a fact it does not state turned out favourable (TV resolution or Smart,
+    monitor size or resolution). These are the 'not sure' listings the AI looks up."""
+    if tv_kind:
+        if r.get("panel") == "PLASMA" or "plasma" in (r.get("title") or "").lower():
+            return None  # plasmas are never 4K
+        v = dict(r)
+        if not r.get("res") or r.get("res_guess"):
+            v["res"] = "4K"
+        if not r.get("smart") and not re.search(r"geen smart|niet smart", f"{r.get('title')} {r.get('desc')}", re.I):
+            v["smart"] = True
+        return tv_first_rule(cfg, v) if v != r else None
+    if r.get("inch") and r["inch"] >= cfg.get("min_inch", 0) and not r.get("res"):
+        for res in GUESS_INCH:
+            if ru := first_rule(cfg, dict(r, res=res)):
+                return ru
+    if r.get("res") in GUESS_INCH and not r.get("inch"):
+        return first_rule(cfg, dict(r, inch=GUESS_INCH[r["res"]]))
+    return None
+
+
+def ai_budget(cfg, s):
+    a = cfg.get("ai") or {}
+    if not a.get("enabled", True) or not ai.key():
+        return 0
+    day = dt.date.today().isoformat()
+    d = s.setdefault("ai_day", {})
+    if d.get("date") != day:
+        d.clear()
+        d.update(date=day, n=0)
+    return max(0, min(a.get("max_per_run", 6), a.get("max_per_day", 150) - d["n"]))
+
+
+def ai_pass(cfg, s, hits, unsure, tv_kind):
+    """Ask the AI about every hit and every 'not sure' listing (hits first, within the budget). Returns the list of
+    (rule, listing, tag) to notify: tag '' = rule confirmed, '❓' = still not sure (notified anyway, the user prefers
+    one push too many over a miss). 'Not sure' listings that the AI shows do not fit are dropped quietly."""
+    kind = "tv" if tv_kind else "monitor"
+    rule_of = (lambda r: tv_first_rule(cfg, r)) if tv_kind else (lambda r: first_rule(cfg, r))
+    todo = [("hit", ru, r) for ru, r in hits] + [("unsure", ru, r) for ru, r in unsure]
+    n = ai_budget(cfg, s)
+    asked = todo[:n]
+    answers = []
+    if asked:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            answers = list(ex.map(lambda x: ai.ask(x[2], kind), asked))
+        s["ai_day"]["n"] += len(asked)
+        s.setdefault("today", {})["ai"] = s.get("today", {}).get("ai", 0) + len(asked)
+    out = []
+    for i, (what, ru, r) in enumerate(todo):
+        a = answers[i] if i < len(answers) else None
+        if what == "unsure" and i >= len(asked):
+            continue  # over budget: stays unchecked, retried next run
+        r2 = ai.apply(r, a, kind)
+        if a:
+            u = a.get("usage") or {}
+            print(f"  AI {r['id']} {what}: {a.get('model')} {a.get('res')} new €{a.get('new_price_eur')} "
+                  f"({a.get('confidence')}) · tokens in {u.get('prompt_tokens')} out {u.get('completion_tokens')}")
+        ru2 = rule_of(r2)
+        if what == "hit":
+            out.append((ru2 or ru, r2, "" if ru2 or not a else "❓"))
+            continue
+        s.setdefault("ai_checked", {})[r["id"]] = {"at": now(), "ok": bool(ru2), "ai": bool(a)}
+        if ru2:
+            out.append((ru2, r2, ""))
+        elif not a or maybe_rule(cfg, r2, tv_kind):  # AI failed or still could not tell
+            out.append((ru, r2, "❓"))
+        else:
+            log(f"AI-NO [{ru['name']}] {r['id']} {r.get('title')!r}: {a.get('model')} {a.get('res')} {a.get('inch')}\"")
     return out
 
 
@@ -332,15 +420,22 @@ def cmd_run(args):
             hits.append((ru, r))
     hits.sort(key=lambda h: rules.index(h[0]))
     hits = verify_hits(cfg, s, hits, tv_kind=False)
+    checked = s.setdefault("ai_checked", {})
+    hit_ids = {x["id"] for _, x in hits}
+    unsure = [(ru, r) for r in pool if r["id"] not in s["alerted"] and r["id"] not in checked
+              and r["id"] not in hit_ids and not first_rule(cfg, r) and (ru := maybe_rule(cfg, r, False))]
+    n_ai = ai_budget(cfg, s) - len(hits)
+    unsure = verify_hits(cfg, s, unsure[:n_ai], tv_kind=False) if n_ai > 0 else []
+    hits = ai_pass(cfg, s, hits, unsure, tv_kind=False)
     shown = 0
-    for ru, r in hits:
-        title, body = describe(ru, r)
+    for ru, r, tag in hits:
+        title, body = describe(ru, r, tag)
         if shown < cfg.get("max_toasts", 4):
             notify.toast(title, body, r["url"])
             shown += 1
         notify.ntfy(cfg.get("ntfy_topic"), title, body, r["url"])
-        s["alerted"][r["id"]] = {"at": now(), "rule": ru["name"], "price": r.get("price")}
-        log(f"ALERT [{ru['name']}] {r['id']} €{r.get('price')} {r.get('model') or r['title']!r} {r.get('city')} {r['url']}")
+        s["alerted"][r["id"]] = {"at": now(), "rule": ru["name"], "price": r.get("price"), "unsure": bool(tag)}
+        log(f"ALERT{' ' + tag if tag else ''} [{ru['name']}] {r['id']} €{r.get('price')} {r.get('model') or r['title']!r} {r.get('city')} {r['url']}")
     # TVs: no database, the newest page per center is the pool; every match not yet notified fires once
     tv_prev = set(s.get("tv_seen_ids", []))
     tv_new = [r for r in tvs if r["id"] not in tv_prev]
@@ -349,14 +444,20 @@ def cmd_run(args):
     tv_hits = [(ru, r) for r in tvs if r["id"] not in s["alerted"] and (ru := tv_first_rule(cfg, r))]
     tv_hits.sort(key=lambda h: tv_rules.index(h[0]))
     tv_hits = verify_hits(cfg, s, tv_hits, tv_kind=True)
-    for ru, r in tv_hits:
-        title, body = describe_tv(ru, r)
+    hit_ids = {x["id"] for _, x in tv_hits}
+    tv_unsure = [(ru, r) for r in tvs if r["id"] not in s["alerted"] and r["id"] not in checked
+                 and r["id"] not in hit_ids and not tv_first_rule(cfg, r) and (ru := maybe_rule(cfg, r, True))]
+    n_ai = ai_budget(cfg, s) - len(tv_hits)
+    tv_unsure = verify_hits(cfg, s, tv_unsure[:n_ai], tv_kind=True) if n_ai > 0 else []
+    tv_hits = ai_pass(cfg, s, tv_hits, tv_unsure, tv_kind=True)
+    for ru, r, tag in tv_hits:
+        title, body = describe_tv(ru, r, tag)
         if shown < cfg.get("max_toasts", 4):
             notify.toast(title, body, r["url"])
             shown += 1
         notify.ntfy(cfg.get("ntfy_topic"), title, body, r["url"])
-        s["alerted"][r["id"]] = {"at": now(), "rule": ru["name"], "price": r.get("price"), "tv": True}
-        log(f"ALERT TV [{ru['name']}] {r['id']} €{r.get('price')} {r['title']!r} {r.get('city')} {r['url']}")
+        s["alerted"][r["id"]] = {"at": now(), "rule": ru["name"], "price": r.get("price"), "tv": True, "unsure": bool(tag)}
+        log(f"ALERT TV{' ' + tag if tag else ''} [{ru['name']}] {r['id']} €{r.get('price')} {r['title']!r} {r.get('city')} {r['url']}")
     hits_all = hits + tv_hits
     if len(hits_all) > shown:
         notify.toast(f"🔔 +{len(hits_all) - shown} avisos más", "python -I alert.py log", "")
@@ -376,14 +477,14 @@ def cmd_run(args):
         if t.hour >= cfg.get("heartbeat_hour", 21) and s.get("heartbeat") != day and cfg.get("heartbeat", True):
             notify.ntfy(cfg.get("ntfy_topic"), "✅ Alertas de monitores y teles activas",
                         f"Hoy: {d['checks']} revisiones · monitores: {d['new']} nuevos, {d['alerts']} alertas · "
-                        f"teles: {d['tv_new']} nuevas, {d['tv_alerts']} alertas.", "", priority=2)
+                        f"teles: {d['tv_new']} nuevas, {d['tv_alerts']} alertas · IA: {d.get('ai', 0)} consultas.", "", priority=2)
             s["heartbeat"] = day
         summary(cfg, pool, new_rows, hits, s)
         summary_tv(cfg, tvs, tv_new, tv_hits)
     save_state(s)
     print(f"{now()}: {len(rows)} newest listings ({n_new} new), {len(hits)} alerts · "
           f"TVs: {len(tvs)} newest ({len(tv_new)} new), {len(tv_hits)} alerts")
-    for ru, r in hits + tv_hits:
+    for ru, r, _ in hits + tv_hits:
         print(f"  ALERT [{ru['name']}] €{r.get('price')} {(r.get('model') or r.get('title') or '')[:60]} · {r.get('city')} · {r['url']}")
 
 
@@ -391,7 +492,7 @@ def summary_tv(cfg, tvs, tv_new, tv_hits):
     out = os.environ.get("GITHUB_STEP_SUMMARY")
     if not out or not tvs:
         return
-    hit = {r["id"]: ru["name"] for ru, r in tv_hits}
+    hit = {r["id"]: ru["name"] for ru, r, *_ in tv_hits}
     L = ["", f"### 📺 Teles · {len(tvs)} revisadas · {len(tv_new)} nuevas · {len(tv_hits)} alertas", ""]
     big = [r for r in tv_new if (r.get("inch") or 0) >= (cfg.get("tv") or {}).get("min_inch", 50)]
     if big:
@@ -412,7 +513,7 @@ def summary(cfg, pool, new_rows, hits, s):
     out = os.environ.get("GITHUB_STEP_SUMMARY")
     if not out:
         return
-    hit_ids = {r["id"]: ru["name"] for ru, r in hits}
+    hit_ids = {r["id"]: ru["name"] for ru, r, *_ in hits}
     L = [f"### {now()} · {len(pool)} anuncios revisados · {len(new_rows)} nuevos desde la revisión anterior · "
          f"{len(hits)} alertas", ""]
     if new_rows:

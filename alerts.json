@@ -8,6 +8,12 @@
  "max_toasts": 4,
  "min_inch": 31,
  "damage": "warn",
+ "ai": {
+  "_help": "DeepSeek check (ai.py) of every listing about to be notified and of listings missing a key fact (TV resolution/Smart, monitor size/resolution). Needs the DEEPSEEK_API_KEY secret. ~0.5 cent per listing.",
+  "enabled": true,
+  "max_per_run": 6,
+  "max_per_day": 150
+ },
  "exclude_title": "\\b(monitor ?)?(standaard|stand|voet|voetje|houder|beugel|lightbar|lamp|arm)\\b|monitorstandaard|monitorarm",
  "exclude_title_unless": "\\bmet\\b|\\bincl|\\+|\\b\\d{2}([.,]\\d)? ?(inch|\\\"|”|duim)",
  "primary_center": "Amsterdam",
