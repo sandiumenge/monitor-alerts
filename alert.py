@@ -358,7 +358,17 @@ def maybe_rule(cfg, r, tv_kind):
                 return ru
     if r.get("res") in GUESS_INCH and not r.get("inch"):
         return first_rule(cfg, dict(r, inch=GUESS_INCH[r["res"]]))
+    if not r.get("inch") and not r.get("res") and not SMALL_HINT.search(r.get("title") or ""):
+        # neither size nor resolution in the text ("LG curved monitor, perfecte staat"): only the photos tell
+        for res, inch in GUESS_INCH.items():
+            if ru := first_rule(cfg, dict(r, inch=inch, res=res)):
+                return ru
     return None
+
+
+# too small to be worth an AI call: "AOC27", "HP E27", "24 inch", model codes W2234S / P2252HS / RG240Y, portables
+SMALL_HINT = re.compile(r"(?<!\d)(1[5-9]|2[0-9])(?!\d)|[a-z](1[5-9]|2[0-7])\d{1,2}[a-z]{0,2}\b|"
+                        r"portable|draagba|zenscreen|\bcm\b|beugel|carelink|cisco", re.I)
 
 
 def ai_budget(cfg, s):
@@ -551,7 +561,13 @@ def cmd_run(args):
               and r["id"] not in hit_ids and not first_rule(cfg, r) and (ru := maybe_rule(cfg, r, False))]
     n_ai = ai_budget(cfg, s) - len(hits)
     unsure = verify_hits(cfg, s, unsure[:n_ai], tv_kind=False) if n_ai > 0 else []
-    hits = ai_pass(cfg, s, hits, unsure, tv_kind=False)
+    keep_u = []
+    for ru, r in unsure:  # the full description already settles it ("24 inch"): no AI call needed
+        if first_rule(cfg, r) or maybe_rule(cfg, r, False):
+            keep_u.append((ru, r))
+        else:
+            checked[r["id"]] = {"at": now(), "ok": False, "ai": False}
+    hits = ai_pass(cfg, s, hits, keep_u, tv_kind=False)
     shown = 0
     for ru, r, tag in hits:
         title, body = describe(ru, r, tag)
