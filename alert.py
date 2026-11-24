@@ -82,6 +82,49 @@ def defect_note(r, only=None):
     return ""
 
 
+DAMAGE_EN = [  # Dutch/English listing phrases → short English for the push (never quote the Dutch text)
+    (r"dode? pixels?|pixel ?(fout\w*|defect\w*)|pixelfout\w*|dead pixels?|stuck pixels?", "dead pixels", "light"),
+    (r"\b(witte?|lichte?)\s+(vlek\w*|stip\w*|plek\w*|puntje\w*)|\bwitte? vlek\w*|white spots?", "white spots", "light"),
+    (r"\b(paar|enkele|kleine?)\s+(vlek\w*|stip\w*|plek\w*|puntje\w*)", "small spots", "light"),
+    (r"clouding|lichtlek\w*|backlight ?bleed\w*|light ?bleed\w*|ips ?glow", "backlight bleed", "light"),
+    (r"\bdeuk(je|jes)?\b|\bdent\b", "a dent", "light"),
+    (r"barst\w*|gebarsten|scheur\w*|gebroken|\bcrack\w*|broken screen|scherm (is )?kapot", "cracked screen", "heavy"),
+    (r"\bkras\w*|scratch\w*", "scratches", "heavy"),
+    (r"\blijn(en|tje|tjes)?\b|streep|strepen|\blines?\b", "lines on screen", "heavy"),
+    (r"inbrand\w*|burn.?in|ingebrand", "burn-in", "heavy"),
+    (r"flikker\w*|knipper\w*|flicker\w*", "flickering", "heavy"),
+    (r"geen beeld|zwart (beeld|scherm)|no picture|black screen", "no picture", "heavy"),
+    (r"backlight|achtergrondverlichting", "backlight fault", "heavy"),
+    (r"donkere? (vlek\w*|plek\w*|zone|gedeelte)|dark (spot|area)\w*", "dark areas", "heavy"),
+    (r"verkleuring|kleurafwijking|roze|paarse? waas|green tint|purple tint", "colour fault", "heavy"),
+    (r"\bvlek(ken)?\b|\bstains?\b", "stains on screen", "heavy"),
+    (r"\bkapot\b|\bdefect\b|\bstuk\b|werkt niet|doet het niet|not working|voor onderdelen|for parts", "broken / for parts", "heavy"),
+]
+DAMAGE_EN = [(re.compile(a, re.I), b, c) for a, b, c in DAMAGE_EN]
+
+
+def damage_en(r, sev):
+    """English damage text: the AI's own summary (it saw the photos and writes English) when it has one, else the
+    non-negated faults found in the listing, translated via DAMAGE_EN (light ones only for light damage)."""
+    d = ((r.get("ai") or {}).get("defects") or "").strip()
+    if d and not re.match(r"(ninguno|ninguna|no |sin |none|nada|nothing|n/a)", d, re.I):
+        return d[:70] + ("…" if len(d) > 70 else "")
+    text = f"{r.get('title') or ''}. {r.get('desc') or ''}"
+    found = []
+    for rx, en, lvl in DAMAGE_EN:
+        if sev == "light" and lvl != "light":
+            continue
+        for m in rx.finditer(text):
+            if not db.NEG.search(text[max(0, m.start() - 35):m.start()]):
+                if en not in found:
+                    found.append(en)
+                break
+    if sev == "heavy":  # lead with the serious faults
+        heavy = {e for _, e, l in DAMAGE_EN if l == "heavy"}
+        found.sort(key=lambda e: e not in heavy)
+    return ", ".join(found[:3])
+
+
 # ---------------------------------------------------------------- rules
 def match(rule, r, price_factor=1.0):
     text = f"{r.get('title') or ''} \n {r.get('desc') or ''} \n {r.get('model') or ''}"
@@ -205,13 +248,54 @@ def fmt_km(k):
 
 
 def where(r):
-    """'📍 Zaandam · 9.6 km' or '📍 Amsterdam · 2.1 km from work 💼': distance to the nearest personal point only;
+    """'🟠 Zaandam · 9.6 km' or '🟢 Amsterdam · 1.4 km from work 💼': distance to the nearest personal point only
+    (🟢 < 2 km, 🟠 < 5 km, 🔴 further);
     Marktplaats' distance to the search center when the listing has no coordinates."""
     city = r.get("city") or "?"
     k, p = prices.nearest(r)
     if p is None:
-        return f"📍 {city} · {k} km"
-    return f"📍 {city} · {fmt_km(k)} km{' from work 💼' if p.get('work') else ''}"
+        return f"{dist_dot(k)} {city} · {k} km"
+    return f"{dist_dot(k)} {city} · {fmt_km(k)} km{' from work 💼' if p.get('work') else ''}"
+
+
+GREEN, ORANGE, RED = "🟢", "🟠", "🔴"
+
+
+def dist_dot(km):
+    return GREEN if km < 2 else ORANGE if km < 5 else RED
+
+
+def quality_dot(f, kind, r):
+    """How good the product itself is. TV points: 4K/8K +2, OLED +2, QLED/NanoCell +1 (not for budget brands),
+    ≥65" +2, ≥55" +1, 2020 or newer +1 → 🟢 ≥4 (55" OLED, 65" 4K, recent QLED), 🟠 2–3 (plain 4K), 🔴 ≤1 (Full HD,
+    HD, plasma, unknown). Monitor points: UWQHD/5K2K/DQHD/4K +2, QHD +1, ≥100Hz +1, USB‑C +1; a wanted model is 🟢."""
+    res = f["res"] or ""
+    if kind == "tv":
+        if f["panel"] == "PLASMA":
+            return RED
+        budget = bool(prices.BUDGET.search(f"{f['brand']} {r.get('title') or ''}"))
+        pts = 2 * (res in ("4K", "8K")) + 2 * (f["panel"] == "OLED") + \
+            ((f["nano"] or f["panel"] == "QLED") and not budget) + \
+            (2 if (f["inch"] or 0) >= 65 else 1 if (f["inch"] or 0) >= 55 else 0) + \
+            (isinstance(f["year"], int) and f["year"] >= 2020)
+    else:
+        if WANTED.search(f"{r.get('title') or ''} {r.get('model') or ''} {(r.get('ai') or {}).get('model') or ''}"):
+            return GREEN
+        pts = (2 if res in ("UWQHD", "5K2K", "DQHD", "4K") else 1 if res == "QHD" else 0) + \
+            ((f["hz"] or 0) >= 100) + bool(f["usbc_w"])
+    return GREEN if pts >= (4 if kind == "tv" else 3) else ORANGE if pts >= 2 else RED
+
+
+def price_dot(p, fair_v):
+    """🟢 at most 60 % of the recommended price, 🟠 up to 90 %, 🔴 above."""
+    if p is None or not fair_v:
+        return ORANGE
+    q = p / fair_v
+    return GREEN if q <= 0.6 else ORANGE if q <= 0.9 else RED
+
+
+WANTED = re.compile(next((ru["models"] for ru in json.loads(RULES_P.read_text(encoding="utf-8"))["rules"]
+                          if ru.get("models")), "$^"), re.I)
 
 
 MON_BRANDS = re.compile(r"\b(dell|alienware|lg|samsung|asus|acer|aoc|benq|hp|iiyama|philips|msi|lenovo|viewsonic|"
@@ -233,6 +317,8 @@ def facts(r, kind):
     text = f"{r.get('title') or ''} {a.get('model') or ''} {r.get('model') or ''}"
     b = (re.search(rf"\b({tv.BRANDS})\b", text, re.I) if kind == "tv" else MON_BRANDS.search(text))
     brand = (b.group(1) if b else r.get("brand") or "").lower()
+    if brand.startswith(("overig", "other", "onbekend", "merkloos")):  # Marktplaats' "Overige merken" = no brand
+        brand = ""
     usbc_w = a.get("usbc_w") or (int(m.group(1)) if (m := re.search(r"(\d+)W", r.get("usbc") or "")) else None)
     return {"brand": BRAND_NAME.get(brand.replace(" ", ""), brand.title()) if brand else "",
             "inch": g("inch"), "res": g("res"), "panel": g("panel"), "hz": g("hz"), "smart": g("smart"),
@@ -266,8 +352,8 @@ def headline(f, kind, room):
     return " ".join(x for x, _ in bits)[:room]
 
 
-def spec_line(f, kind):
-    """'📏 34" · 3440×1440 (UWQHD) · 100Hz · VA · USB‑C 65W · curved' / '📏 55" · 4K · OLED · Smart · 2018'
+def spec_line(f, kind, r):
+    """'🟢 34" · 3440×1440 (UWQHD) · 100Hz · VA · USB‑C 65W · curved' / '🟢 55" · 4K · OLED · Smart · 2018'
     (may wrap to a second line on the phone)."""
     q = "?" if f["guess"] else ""
     if kind == "tv":
@@ -279,11 +365,11 @@ def spec_line(f, kind):
         bits = [inch_s(f), f"{RES_PX[res]} ({res}){q}" if res in RES_PX else res + q if res else "res ?",
                 f"{f['hz']}Hz" if f["hz"] else "", f["panel"] or "",
                 f"USB‑C {f['usbc_w']}W" if f["usbc_w"] else "", "curved" if f["curved"] else "", str(f["year"] or "")]
-    return "📏 " + " · ".join(x for x in bits if x)
+    return quality_dot(f, kind, r) + " " + " · ".join(x for x in bits if x)
 
 
 def price_line(r, kind):
-    """'💶 Recommended €241 · New €400 (−88%)', short enough for one phone line: the fair second-hand value, then the
+    """'🟢 Recommended €241 · New €400 (−88%)', short enough for one phone line: the fair second-hand value, then the
     real new price (models.json / the AI / the new-today estimate) and how far the asking price is below it."""
     p = r.get("price")
     new = r.get("new_price") or prices.new_of(r, kind)
@@ -292,7 +378,7 @@ def price_line(r, kind):
     if new:
         d = round((1 - p / new) * 100) if p else None
         parts.append(f"New €{new:.0f}" + (f" (−{d}%)" if d and d > 0 else ""))
-    return "💶 " + " · ".join(parts) if parts else ""
+    return price_dot(prices.eff_price(r), f) + " " + " · ".join(parts) if parts else ""
 
 
 def bids(r):
@@ -300,7 +386,7 @@ def bids(r):
     if not (r.get("n_bids") and r.get("top_bid")):
         return ""
     n = r["n_bids"]
-    return f"🔨 {n} bid{'s' if n > 1 else ''} already · highest €{r['top_bid']:.0f}"
+    return f"{n} bid{'s' if n > 1 else ''} already · highest €{r['top_bid']:.0f}"
 
 
 def describe(rule, r, tag=""):
@@ -324,9 +410,10 @@ def finish(r, tag, kind):
     title = head + headline(f, kind, room)
     dmg = ""
     if sev:
-        quote = defect_note(r, LIGHT_RX if sev == "light" else None) or (r.get("ai") or {}).get("defects") or ""
-        title += " · 🔴" if sev == "heavy" else " · 🟠"
-        dmg = ("🔴 Heavy damage" if sev == "heavy" else "🟠 Light damage") + (f": «{quote[:60]}{'…' if len(quote) > 60 else ''}»" if quote else "")
+        en = damage_en(r, sev) or "check the listing"
+        title += " · ⛔" if sev == "heavy" else " · ⚠️"
+        dmg = (f"⛔ Badly broken{': ' + en if en else ''} ⛔" if sev == "heavy"
+               else f"⚠️ Light damage{': ' + en if en else ''} ⚠️")
     if tag:
         title += " ❓"
     a = ai.line(r)
@@ -334,7 +421,7 @@ def finish(r, tag, kind):
         a = "❓ Size or resolution unknown and could not be checked"
     elif tag:
         a = (a + "\n" if a else "") + "❓ The AI is not fully sure: have a look"
-    lines = [bids(r), spec_line(f, kind), dmg, price_line(r, kind), where(r), a]
+    lines = [dmg, bids(r), spec_line(f, kind, r), price_line(r, kind), where(r), a]
     return title, "\n".join(x for x in lines if x)
 
 
@@ -826,14 +913,15 @@ def cmd_toast(args):
 
 def cmd_ping(args):
     cfg = conf()
-    ok = notify.ntfy(cfg.get("ntfy_topic"), "P97 · €75 · 🖥️ iiyama 34\" ultrawide · 🟠",
-                     "📏 34\" · 3440×1440 (UWQHD) · 75Hz · VA · USB‑C 65W\n"
-                     "🟠 Light damage: «2 dode pixels rechtsboven, verder perfect»\n"
-                     "💶 Recommended €160 · New €330 (−77%)\n📍 Amsterdam · 3.2 km\n"
+    ok = notify.ntfy(cfg.get("ntfy_topic"), "P97 · €75 · 🖥️ iiyama 34\" ultrawide · ⚠️",
+                     "⚠️ Light damage: dead pixels ⚠️\n"
+                     "🟠 34\" · 3440×1440 (UWQHD) · 75Hz · VA · USB‑C 65W\n"
+                     "🟢 Recommended €160 · New €330 (−77%)\n🟠 Amsterdam · 3.2 km\n"
                      "(TEST sample, not a real listing)", "https://www.marktplaats.nl")
-    ok = notify.ntfy(cfg.get("ntfy_topic_tv"), "P93 · €80 · 📺 Philips 55\" 4K Smart",
-                     "📏 55\" · 4K · LED · Smart · 2018\n💶 Recommended €177 · New €411 (−81%)\n"
-                     "📍 Amsterdam · 1.6 km\n"
+    ok = notify.ntfy(cfg.get("ntfy_topic_tv"), "P96 · €20 · 📺 Samsung 65\" 4K QLED · ⛔",
+                     "⛔ Badly broken: cracked screen, lines on screen ⛔\n"
+                     "🟢 65\" · 4K · QLED · Smart · 2019\n🟢 Recommended €40 · New €845 (−98%)\n"
+                     "🟢 Amsterdam · 1.6 km\n"
                      "(TEST sample, not a real listing)", "https://www.marktplaats.nl") and ok
     print("phone push sent" if ok else "phone push FAILED (is NTFY_TOPIC set?)")
 

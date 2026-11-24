@@ -123,7 +123,7 @@ def line(r):
     s = ""
     if a.get("defects") and a.get("damage") not in ("light", "heavy") and not r.get("damage") and \
             not re.match(r"(ninguno|ninguna|no |sin |none|nada|nothing|n/a)", a["defects"], re.I):
-        s += f"\n🤖 AI sees: {a['defects'][:100]}"  # light/heavy verdicts are shown in the damage line instead
+        s += f"\n⚠️ AI sees:{a['defects'][:100]}"  # light/heavy verdicts are shown in the damage line instead
     return s.strip()
 
 
