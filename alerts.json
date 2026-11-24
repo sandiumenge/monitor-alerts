@@ -1,12 +1,11 @@
 {
- "_help": "Each rule: name + any of min_inch, max_inch, min_inch_if_known (skip only when the size is known and smaller), max_price, res / not_res [list, e.g. UWQHD/4K/QHD/UWFHD], panel [list], min_hz, usbc_charge (true), min_discount (%), models (regex on model/title/description), any (regex that must appear), none (regex that must NOT appear), no_damage (true; ignored while global damage = warn), max_km, allow_no_price (true = also listings without a price). A listing fires the first rule it matches. Test changes with: python -I alert.py test Global: min_inch drops listings whose known size is smaller; exclude_title skips accessory-only titles unless exclude_title_unless also matches. Phone push topic: data/ntfy_topic.txt locally, NTFY_TOPIC secret in GitHub Actions. Listings found only around a non-primary center (Utrecht) must cost at most other_center_price_factor x the rule's max_price; heavily damaged ones (scratches, cracks, lines, dark areas, not working; not a few dead pixels) at most heavy_damage_price_factor x (both multiply), and they only notify with a value percentile >= heavy_min_percentile (scored at 10 % of the fair value). With lowball = true, listings asking more than a rule's max_price but taking bids also notify (lowball chance) when min(1.5 x the highest bid, or 1.5 x the minimum bid if nobody bid, asking price) is strictly under max_price.",
+ "_help": "Global alert settings. What to search and the rules live in kinds/<name>.json (one file per kind of product: monitor, tv, ...). Phone push topic: data/ntfy_topic.txt locally, NTFY_TOPIC secret in GitHub Actions ('monitores-<id>'; each kind gets '<topic>-<id>'). Listings found only around a non-primary center (Utrecht) must cost at most other_center_price_factor x the rule's max_price; heavily damaged ones at most heavy_damage_price_factor x (both multiply), and they only notify with a value percentile >= heavy_min_percentile (scored at 10 % of the fair value). damage = warn: damaged listings still notify with a light/heavy damage line; skip: never. With lowball = true, listings asking more than a rule's max_price but taking bids also notify when min(1.5 x the highest bid, or 1.5 x the minimum bid if nobody bid, asking price) is strictly under max_price. Test changes with: python -I alert.py test",
  "every_minutes": 10,
  "quiet_hours": [
   1,
   7
  ],
  "max_toasts": 4,
- "min_inch": 31,
  "damage": "warn",
  "ai": {
   "_help": "DeepSeek check (ai.py) of every listing about to be notified and of listings missing a key fact (TV resolution/Smart, monitor size/resolution). Needs the DEEPSEEK_API_KEY secret. ~0.5 cent per listing.",
@@ -14,124 +13,10 @@
   "max_per_run": 6,
   "max_per_day": 150
  },
- "exclude_title": "\\b(monitor ?)?(standaard|stand|voet|voetje|houder|beugel|lightbar|lamp|arm)\\b|monitorstandaard|monitorarm",
- "exclude_title_unless": "\\bmet\\b|\\bincl|\\+|\\b\\d{2}([.,]\\d)? ?(inch|\\\"|”|duim)",
  "primary_center": "Amsterdam",
  "other_center_price_factor": 0.6,
  "heavy_damage_price_factor": 0.5,
  "heavy_min_percentile": 70,
  "lowball": false,
- "ntfy_topic": "",
- "rules": [
-  {
-   "name": "Modelo deseado",
-   "models": "u3223qe|p3223qe|p3421w|u3419w|u3423we|34wn80c|34wq75c|35wn75c|s34a650|s65u|c34h890|ch890|c34j791|cj791|346e2c|u34v5c|cu34p2c|s34c65|34wq650",
-   "max_price": 150,
-   "no_damage": true
-  },
-  {
-   "name": "Ultrawide con USB‑C",
-   "res": [
-    "UWQHD",
-    "5K2K"
-   ],
-   "usbc_charge": true,
-   "max_price": 130,
-   "no_damage": true
-  },
-  {
-   "name": "Ultrawide 34–35\" (con o sin USB‑C)",
-   "res": [
-    "UWQHD"
-   ],
-   "min_inch": 33.5,
-   "max_price": 150,
-   "no_damage": true
-  },
-  {
-   "name": "Ultrawide sin modelo, barato",
-   "any": "ultra ?-?wide|\\b34 ?(inch|\"|”|duim)|3440|21:9|\\b35 ?(inch|\"|”)",
-   "none": "29 ?(inch|\"|”)|2560 ?x ?1080|uwfhd",
-   "max_price": 100,
-   "no_damage": true,
-   "not_res": [
-    "UWFHD"
-   ],
-   "min_inch_if_known": 33
-  },
-  {
-   "name": "32\" 4K",
-   "res": [
-    "4K"
-   ],
-   "min_inch": 31,
-   "max_inch": 32.5,
-   "max_price": 110,
-   "no_damage": true
-  },
-  {
-   "name": "32\" QHD barato",
-   "res": [
-    "QHD"
-   ],
-   "min_inch": 31,
-   "max_inch": 32.5,
-   "max_price": 60,
-   "no_damage": true
-  },
-  {
-   "name": "Chollo (≥31\", −70 %)",
-   "min_inch": 31,
-   "min_discount": 70,
-   "max_price": 150,
-   "no_damage": true,
-   "not_res": [
-    "UWFHD"
-   ]
-  }
- ],
- "tv": {
-  "_help": "Large TVs (Marktplaats > Audio, Tv en Foto > Televisies), newest page per center. Parsing in tv.py: inch, res (HD/FHD/4K/8K or null = unknown), panel (OLED/QLED/LED/LCD/PLASMA), smart, year. Damaged listings alert with a ⚠️ quote of the defect (global \"damage\": \"warn\"; \"skip\" drops them); parts/accessories and 'gezocht' listings never alert. Same keys as monitor rules plus not_panel [list] and smart (true). Same Utrecht price factor.",
-  "enabled": true,
-  "min_inch": 50,
-  "fetch_max_price": 250,
-  "none": "\\b(gezocht|gevraagd|ruilen)\\b",
-  "rules": [
-   {
-    "name": "QLED/OLED ≥55\"",
-    "panel": ["OLED", "QLED"],
-    "min_inch": 55,
-    "max_price": 175
-   },
-   {
-    "name": "Tele ≥65\"",
-    "res": ["4K", "8K", null],
-    "not_panel": ["PLASMA"],
-    "min_inch": 65,
-    "max_price": 120
-   },
-   {
-    "name": "4K Smart ≥55\"",
-    "res": ["4K", "8K"],
-    "smart": true,
-    "min_inch": 55,
-    "max_price": 120
-   },
-   {
-    "name": "4K ≥50\"",
-    "res": ["4K", "8K"],
-    "max_price": 90
-   },
-   {
-    "name": "Tele ≥50\" barata",
-    "not_panel": ["PLASMA"],
-    "max_price": 50
-   },
-   {
-    "name": "Plasma ≥50\" casi gratis",
-    "panel": ["PLASMA"],
-    "max_price": 15
-   }
-  ]
- }
+ "ntfy_topic": ""
 }

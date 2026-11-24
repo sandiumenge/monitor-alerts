@@ -2,7 +2,8 @@
 
 Used by alert.py only on listings that are about to be notified, or that might fit a rule but miss a key fact
 (a TV with no stated resolution, a monitor with no size). It identifies the exact model, checks the specs and
-looks up the new price, so the push can show "New €X (−Y%)".
+looks up the new price, so the push can show "New €X (−Y%)". The prompt and which answer fields are copied
+into the listing come from the listing's kind (kinds/: Kind.ai_system, AI_COPY, ai_apply_extra).
 
 Key: DEEPSEEK_API_KEY env var (GitHub secret) or data/deepseek_key.txt locally (both kept out of git).
 Only public listing data (title, description, price, photo URLs) is sent.
@@ -20,40 +21,26 @@ URL = "https://api.deepseek.com/chat/completions"
 MODEL = "deepseek-flash"
 ROOT = Path(__file__).resolve().parent
 
-SYSTEM = (
-    "You check second-hand listings from Marktplaats (Netherlands) for a buyer. Identify the exact product model "
-    "from the title, description and photos (labels, stickers, remote, stand, logos). If the model is known or can be "
-    "narrowed down, search the web for its specs and for its current new price in the Netherlands/EU (or its last "
-    "price when it was sold new, if discontinued). If the exact model cannot be found, still give the MOST LIKELY "
-    "resolution, panel, Smart and new price for that brand, size, year and range (e.g. which Ambilight 55\" models "
-    "Philips sold that year) and set confidence to media or baja; use null only when there is no basis at all. "
-    "Answer with ONE JSON object "
-    "and nothing else, with these keys:\n"
-    '{"model": str|null, "inch": number|null, "res": "HD"|"FHD"|"QHD"|"UWFHD"|"UWQHD"|"4K"|"5K2K"|"8K"|null, '
-    '"panel": "OLED"|"QLED"|"LED"|"LCD"|"PLASMA"|"IPS"|"VA"|"TN"|null, "smart": bool|null, "hz": int|null, '
-    '"year": int|null, "usbc_w": int|null, "new_price_eur": number|null, "confidence": "alta"|"media"|"baja", '
-    '"defects": str|null, "damage": "none"|"light"|"heavy", "note": str}\n'
-    "usbc_w = USB-C power delivery in watts (monitors only). defects = any damage or fault the seller mentions or "
-    "the photos show, in English, short; null when there is none. damage = light for small faults a buyer can live "
-    "with (a few dead or white pixels, slight backlight bleed, a dent in the casing, missing remote/stand), heavy for "
-    "scratches on the screen, cracks, lines, dark or discoloured areas, burn-in, flickering or not working. note = one short sentence in English for the buyer (max 90 characters): "
-    "what it is and whether the price is good."
-)
-
-
 def key():
     k = os.environ.get("DEEPSEEK_API_KEY", "").strip()
     f = ROOT / "data" / "deepseek_key.txt"
     return k or (f.read_text(encoding="utf-8").strip() if f.exists() else "")
 
 
-def ask(r, kind="tv", timeout=100):
+def kind_of(kind):
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    import kinds  # noqa: E402
+    return kinds.get(kind)
+
+
+def ask(r, kind, timeout=100):
     """Returns the parsed dict (plus 'usage'), or None on any failure: the push then goes out without it."""
     k = key()
     if not k:
         return None
-    what = "TV" if kind == "tv" else "computer monitor"
-    text = (f"Product type: {what}\nTitle: {r.get('title')}\nAsking price: "
+    K = kind_of(kind)
+    text = (f"Product type: {K.ai_product}\nTitle: {r.get('title')}\nAsking price: "
             f"{'€%.0f' % r['price'] if r.get('price') else 'not stated / bidding'}\n"
             f"Marktplaats attributes: {json.dumps(r.get('attrs') or {}, ensure_ascii=False)}\n"
             f"Description: {(r.get('desc') or '')[:3000]}")
@@ -61,7 +48,7 @@ def ask(r, kind="tv", timeout=100):
     content += [{"type": "image_url", "image_url": {"url": u}} for u in (r.get("imgs") or [])[:2]]
     body = {"model": MODEL, "thinking": {"type": "disabled"}, "max_tokens": 700, "stream": False,
             "tools": [{"type": "deepseek_web_search"}],
-            "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": content}]}
+            "messages": [{"role": "system", "content": K.ai_system()}, {"role": "user", "content": content}]}
     req = urllib.request.Request(URL, data=json.dumps(body).encode("utf-8"), method="POST",
                                  headers={"Content-Type": "application/json", "Authorization": f"Bearer {k}"})
     try:
@@ -92,8 +79,9 @@ def apply(r, a, kind):
     """Copy what the AI found into the listing (only fields the listing does not state itself)."""
     if not a:
         return r
+    K = kind_of(kind)
     r = dict(r, ai=a)
-    for f in ("inch", "res", "panel", "hz", "year", "smart"):
+    for f in K.AI_COPY:
         v = a.get(f)
         if v in (None, ""):
             continue
@@ -101,14 +89,10 @@ def apply(r, a, kind):
             r["res"], r["res_guess"] = v, a.get("confidence") != "alta"  # replace our year-based guess
         elif not r.get(f):
             r[f] = v
-    if kind != "tv":
-        if a.get("model") and not r.get("model"):
-            r["model"] = a["model"]
-        if a.get("usbc_w") and not re.search(r"\d+W", r.get("usbc") or ""):
-            r["usbc"] = f"{a['usbc_w']}W"
+    r = K.ai_apply_extra(r, a)
     new = a.get("new_price_eur")
     if isinstance(new, (int, float)) and new > 0 and r.get("price"):
-        if kind == "tv" or not r.get("new_price"):
+        if K.AI_NEW_PRICE_ALWAYS or not r.get("new_price"):
             r["new_price"] = new
             r["discount"] = round((1 - r["price"] / new) * 100)
     return r
@@ -123,19 +107,20 @@ def line(r):
     s = ""
     if a.get("defects") and a.get("damage") not in ("light", "heavy") and not r.get("damage") and \
             not re.match(r"(ninguno|ninguna|no |sin |none|nada|nothing|n/a)", a["defects"], re.I):
-        s += f"\n⚠️ AI sees:{a['defects'][:100]}"  # light/heavy verdicts are shown in the damage line instead
+        s += f"\n⚠️ AI sees: {a['defects'][:100]}"  # light/heavy verdicts are shown in the damage line instead
     return s.strip()
 
 
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
     import db  # noqa: E402
-    import tv  # noqa: E402
+    import kinds  # noqa: E402
     u = sys.argv[1]
     d = db.fetch_details(u)
     r = {"id": u, "title": d.get("title") or u, "desc": d["desc"], "price": d.get("price"), "imgs": d.get("imgs") or []}
-    kind = "tv" if "/televisies/" in u else "monitor"
-    r = tv.parse(r) if kind == "tv" else db.enrich(dict({k: None for k in db.COLS}, **r))
+    ks = list(kinds.all_kinds().values())  # the kind whose url_hint ("/televisies/") is in the URL, else the first
+    kind = next((k for k in ks if k.cfg.get("url_hint") and k.cfg["url_hint"] in u), ks[0])
+    r = kind.parse(r)
     print(f"key: {'yes' if key() else 'MISSING'} · photos: {len(r.get('imgs') or [])}")
     a = ask(r, kind)
     print(json.dumps(a, ensure_ascii=False, indent=1))

@@ -1,21 +1,24 @@
-"""Monitor alerts: light Marktplaats check + rules from alerts.json -> Windows toast (and optional phone push).
+"""Marketplace alerts: light Marktplaats check of every kind in kinds/ (monitors, TVs, …) + their rules ->
+phone push (ntfy, one topic per kind) and Windows toast.
 
-  python -I alert.py run          one check (what the scheduled task runs): newest page of "Monitoren" per center
-                                  (2 API calls), upsert into monitors.db, notify listings that match a rule
-  python -I alert.py test         evaluate the rules against every active listing in the DB (no network, no toast)
+  python -I alert.py run          one check (what the scheduled task runs): newest page of each kind per center,
+                                  rules, full-description check, AI second opinion, push
+  python -I alert.py test         evaluate the rules of every kind against stored listings (no network, no push)
   python -I alert.py toast        send a sample notification to check that toasts work
-  python -I alert.py ping         send a sample phone push only
-  python -I alert.py seed         mark every current match as already notified (no toasts)
+  python -I alert.py ping         send one sample phone push per kind (built by the real formatter)
+  python -I alert.py seed         mark every current match as already notified (no pushes)
   python -I alert.py log          last 30 notified listings
 
-Anti-ban: 2 calls per run, 3-6 s apart; quiet hours skip the night; any HTTP error (403/429/5xx) pauses
-all checks for an hour (doubling up to 8 h while errors persist).
+What each kind searches, its rules and how it is valued and shown live in kinds/<name>.json (+ kinds/<name>.py);
+alerts.json holds the settings shared by all kinds (AI budget, Utrecht factor, damage handling, quiet hours).
+
+Anti-ban: 2 calls per kind per run (one per center), 3-6 s apart; quiet hours skip the night; any HTTP error
+(403/429/5xx) pauses all checks for an hour (doubling up to 8 h while errors persist).
 """
 import datetime as dt
 import json
 import os
 import random
-import re
 import sys
 import time
 from pathlib import Path
@@ -24,15 +27,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import db  # noqa: E402
 import hunt  # noqa: E402
 import ai  # noqa: E402
+import kinds  # noqa: E402
 import notify  # noqa: E402
 import prices  # noqa: E402
-import tv  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent
 RULES_P = ROOT / "alerts.json"
 STATE_P = hunt.DATA / "alert_state.json"
 LOG_P = hunt.DATA / "alerts.log"
-IGNORED_DAMAGE = {"sin cable/fuente"}
+KINDS = kinds.all_kinds()  # {name: Kind}
 
 
 def now():
@@ -47,11 +50,12 @@ def log(msg):
 def conf():
     cfg = json.loads(RULES_P.read_text(encoding="utf-8"))
     topic_f = hunt.DATA / "ntfy_topic.txt"  # kept out of git; in GitHub Actions it comes from the NTFY_TOPIC secret
-    cfg["ntfy_topic"] = os.environ.get("NTFY_TOPIC") or cfg.get("ntfy_topic") or         (topic_f.read_text(encoding="utf-8").strip() if topic_f.exists() else "")
-    # TVs go to their own topic (own thread in the ntfy app): "monitores-<id>" -> "tv-<id>", unless NTFY_TOPIC_TV is set
-    t = cfg["ntfy_topic"]
-    cfg["ntfy_topic_tv"] = os.environ.get("NTFY_TOPIC_TV") or (
-        ("tv-" + t[len("monitores-"):] if t.startswith("monitores-") else t + "-tv") if t else "")
+    cfg["ntfy_topic"] = os.environ.get("NTFY_TOPIC") or cfg.get("ntfy_topic") or \
+        (topic_f.read_text(encoding="utf-8").strip() if topic_f.exists() else "")
+    # one topic per kind (own thread in the ntfy app): "monitores-<id>" -> "tv-<id>", … unless NTFY_TOPIC_<NAME> is set
+    first = next(iter(KINDS.values()), None)
+    cfg["topics"] = {k.name: os.environ.get(f"NTFY_TOPIC_{k.name.upper()}") or k.topic(cfg["ntfy_topic"], k is first)
+                     for k in KINDS.values()}
     global WARN_DAMAGE
     WARN_DAMAGE = cfg.get("damage", "warn") == "warn"
     return cfg
@@ -61,186 +65,10 @@ PRICE_REF = {}  # prices.py reference + listings seen in the cloud; set in cmd_r
 WARN_DAMAGE = True  # alerts.json "damage": "warn" = damaged listings still notify, flagged ⚠️; "skip" = never
 
 
-def defect_note(r, only=None):
-    """Short quote of the first non-negated defect phrase in the title/description, or ''. With `only` (the light
-    damage regex) quote that; otherwise skip light phrases so a heavy listing quotes its heavy fault."""
-    text = f"{r.get('title') or ''}. {r.get('desc') or ''}"
-    rxs = [only] if only else [tv.DAMAGE_RX] + [re.compile(x[0], re.I) for x in db.DAMAGE if len(x) > 2 and x[2]]
-    light = [] if only else [(m.start(), m.end()) for m in LIGHT_RX.finditer(text)]
-    for rx in rxs:
-        for m in rx.finditer(text):
-            if db.NEG.search(text[max(0, m.start() - 35):m.start()]):
-                continue
-            if any(a < m.end() and m.start() < b for a, b in light):
-                continue
-            a = max(text.rfind(".", 0, m.start()) + 1, m.start() - 50)
-            if a and not text[a - 1].isspace() and text[a - 1] != ".":
-                a = text.find(" ", a, m.start()) + 1 or a  # don't start mid-word
-            b = text.find(".", m.end())
-            b = min(b if b != -1 else len(text), m.end() + 60)
-            return text[a:b].strip()
-    return ""
-
-
-DAMAGE_EN = [  # Dutch/English listing phrases → short English for the push (never quote the Dutch text)
-    (r"dode? pixels?|pixel ?(fout\w*|defect\w*)|pixelfout\w*|dead pixels?|stuck pixels?", "dead pixels", "light"),
-    (r"\b(witte?|lichte?)\s+(vlek\w*|stip\w*|plek\w*|puntje\w*)|\bwitte? vlek\w*|white spots?", "white spots", "light"),
-    (r"\b(paar|enkele|kleine?)\s+(vlek\w*|stip\w*|plek\w*|puntje\w*)", "small spots", "light"),
-    (r"clouding|lichtlek\w*|backlight ?bleed\w*|light ?bleed\w*|ips ?glow", "backlight bleed", "light"),
-    (r"\bdeuk(je|jes)?\b|\bdent\b", "a dent", "light"),
-    (r"barst\w*|gebarsten|scheur\w*|gebroken|\bcrack\w*|broken screen|scherm (is )?kapot", "cracked screen", "heavy"),
-    (r"\bkras\w*|scratch\w*", "scratches", "heavy"),
-    (r"\blijn(en|tje|tjes)?\b|streep|strepen|\blines?\b", "lines on screen", "heavy"),
-    (r"inbrand\w*|burn.?in|ingebrand", "burn-in", "heavy"),
-    (r"flikker\w*|knipper\w*|flicker\w*", "flickering", "heavy"),
-    (r"geen beeld|zwart (beeld|scherm)|no picture|black screen", "no picture", "heavy"),
-    (r"backlight|achtergrondverlichting", "backlight fault", "heavy"),
-    (r"donkere? (vlek\w*|plek\w*|zone|gedeelte)|dark (spot|area)\w*", "dark areas", "heavy"),
-    (r"verkleuring|kleurafwijking|roze|paarse? waas|green tint|purple tint", "colour fault", "heavy"),
-    (r"\bvlek(ken)?\b|\bstains?\b", "stains on screen", "heavy"),
-    (r"\bkapot\b|\bdefect\b|\bstuk\b|werkt niet|doet het niet|not working|voor onderdelen|for parts", "broken / for parts", "heavy"),
-]
-DAMAGE_EN = [(re.compile(a, re.I), b, c) for a, b, c in DAMAGE_EN]
-
-
-def damage_en(r, sev):
-    """English damage text: the AI's own summary (it saw the photos and writes English) when it has one, else the
-    non-negated faults found in the listing, translated via DAMAGE_EN (light ones only for light damage)."""
-    d = ((r.get("ai") or {}).get("defects") or "").strip()
-    if d and not re.match(r"(ninguno|ninguna|no |sin |none|nada|nothing|n/a)", d, re.I):
-        return d[:70] + ("…" if len(d) > 70 else "")
-    text = f"{r.get('title') or ''}. {r.get('desc') or ''}"
-    found = []
-    for rx, en, lvl in DAMAGE_EN:
-        if sev == "light" and lvl != "light":
-            continue
-        for m in rx.finditer(text):
-            if not db.NEG.search(text[max(0, m.start() - 35):m.start()]):
-                if en not in found:
-                    found.append(en)
-                break
-    if sev == "heavy":  # lead with the serious faults
-        heavy = {e for _, e, l in DAMAGE_EN if l == "heavy"}
-        found.sort(key=lambda e: e not in heavy)
-    return ", ".join(found[:3])
-
-
-# ---------------------------------------------------------------- rules
-def match(rule, r, price_factor=1.0):
-    text = f"{r.get('title') or ''} \n {r.get('desc') or ''} \n {r.get('model') or ''}"
-    p = r.get("price")
-    if "max_price" in rule:
-        if p is None:
-            if not rule.get("allow_no_price"):
-                return False
-        elif p > rule["max_price"] * price_factor:
-            return False
-    inch = r.get("inch")
-    if "min_inch" in rule and not (inch and inch >= rule["min_inch"]):
-        return False
-    if "min_inch_if_known" in rule and inch and inch < rule["min_inch_if_known"]:
-        return False
-    if "max_inch" in rule and not (inch and inch <= rule["max_inch"]):
-        return False
-    if "res" in rule and r.get("res") not in rule["res"]:
-        return False
-    if "not_res" in rule and r.get("res") in rule["not_res"]:
-        return False
-    if "panel" in rule and (r.get("panel") or "") not in rule["panel"]:
-        return False
-    if "min_hz" in rule and not (r.get("hz") and r["hz"] >= rule["min_hz"]):
-        return False
-    if rule.get("usbc_charge") and not re.search(r"\d+W|yes", r.get("usbc") or ""):
-        return False
-    if "min_discount" in rule and not (r.get("discount") is not None and r["discount"] >= rule["min_discount"]):
-        return False
-    if "models" in rule and not re.search(rule["models"], text, re.I):
-        return False
-    if "any" in rule and not re.search(rule["any"], text, re.I):
-        return False
-    if "none" in rule and re.search(rule["none"], text, re.I):
-        return False
-    if rule.get("no_damage") and not WARN_DAMAGE and set(filter(None, (r.get("damage") or "").split(", "))) - IGNORED_DAMAGE:
-        return False
-    if "max_km" in rule and (r.get("km") or 0) > rule["max_km"]:
-        return False
-    if "not_panel" in rule and r.get("panel") in rule["not_panel"]:
-        return False
-    if rule.get("smart") and not r.get("smart"):
-        return False
-    return True
-
-
-def price_factor(cfg, r):
-    """Listings only found around the other center (Utrecht) and heavily damaged ones must be bigger steals."""
-    f = 1.0
-    primary = cfg.get("primary_center")
-    if primary and r.get("near") and primary not in r["near"]:
-        f *= cfg.get("other_center_price_factor", 1.0)
-    if severity(r) == "heavy":
-        f *= cfg.get("heavy_damage_price_factor", 0.5)
-    return f
-
-
-def tv_first_rule(cfg, r):
-    """TV rules (alerts.json 'tv'): ≥ min_inch, never parts / accessories / wanted ads."""
-    t = cfg.get("tv") or {}
-    if (r.get("damage") and not WARN_DAMAGE) or r.get("accessory") or not (r.get("inch") and r["inch"] >= t.get("min_inch", 50)):
-        return None
-    if t.get("none") and re.search(t["none"], f"{r.get('title')} {r.get('desc') or ''}", re.I):
-        return None
-    factor = price_factor(cfg, r)
-    return next((ru for ru in t.get("rules", []) if match(ru, r, factor)), None)
-
-
-def globally_ok(cfg, r):
-    """Applies to every rule: drop listings with a known size under min_inch and accessory-only titles."""
-    if r.get("inch") and r["inch"] < cfg.get("min_inch", 0):
-        return False
-    t = r.get("title") or ""
-    if cfg.get("exclude_title") and re.search(cfg["exclude_title"], t, re.I) and \
-            not re.search(cfg.get("exclude_title_unless", "$^"), t, re.I):
-        return False
-    return True
-
-
-def first_rule(cfg, r):
-    if not globally_ok(cfg, r):
-        return None
-    factor = price_factor(cfg, r)
-    return next((ru for ru in cfg["rules"] if match(ru, r, factor)), None)
-
-
-# ---------------------------------------------------------------- damage: light (acceptable) vs heavy
-LIGHT_RX = re.compile(
-    r"dode? pixels?|pixel ?(fout\w*|defect\w*)|pixelfout\w*|dead pixels?|stuck pixels?|"
-    r"\b(paar|enkele|kleine?|lichte?|witte?)\s+(vlek\w*|stip\w*|plek\w*|puntje\w*)|\bwitte? vlek\w*|"
-    r"clouding|lichtlek\w*|backlight ?bleed\w*|light ?bleed\w*|ips ?glow|\bdeuk(je|jes)?\b|\bdent\b", re.I)
-HEAVY_LABELS = {"roto/grieta", "defecto", "daños", "rayas", "líneas", "parpadeo", "quemado", "zona oscura",
-                "tono de color", "manchas"}
-
-
-def damaged(r):
-    d = r.get("damage")
-    return bool(d) and not (isinstance(d, str) and set(filter(None, d.split(", "))) <= IGNORED_DAMAGE)
-
-
-def severity(r):
-    """None, 'light' (a few dead/white pixels, light bleed, a dent: acceptable) or 'heavy' (scratches, cracks,
-    lines, dark areas, colour faults, not working). The AI's verdict (it also sees the photos) wins when it has one."""
-    a = (r.get("ai") or {}).get("damage")
-    if a in ("light", "heavy"):
-        return a
-    if not damaged(r):
-        return None
-    text = f"{r.get('title') or ''}. {r.get('desc') or ''}"
-    rest = LIGHT_RX.sub(" ", text)
-    if r.get("cond") == tv.NOT_WORKING or tv.has_damage(rest) or set(db.flags(rest, db.DAMAGE)) & HEAVY_LABELS:
-        return "heavy"
-    return "light"
-
-
+# ---------------------------------------------------------------- push layout
 POINTS = prices.POINTS  # personal points (ALERT_POINTS secret / data/points.json): distances and trip cost
+GREEN, ORANGE, RED = kinds.base.GREEN, kinds.base.ORANGE, kinds.base.RED
+PRIMARY = json.loads(RULES_P.read_text(encoding="utf-8")).get("primary_center", "Amsterdam")
 
 
 def fmt_km(k):
@@ -258,10 +86,6 @@ def where(r):
     return f"{dist_dot(k, r)} {city} · {fmt_km(k)} km{' from work 💼' if p.get('work') else ''}"
 
 
-GREEN, ORANGE, RED = "🟢", "🟠", "🔴"
-PRIMARY = json.loads(RULES_P.read_text(encoding="utf-8")).get("primary_center", "Amsterdam")
-
-
 def dist_dot(km, r=None):
     """🟢 < 3 km, 🟠 < 6 km, 🔴 further around Amsterdam; around another center the limits shrink with its search
     radius (Utrecht 6 km / Amsterdam 15 km = ×0.4 → 🟢 < 1.2 km, 🟠 < 2.4 km)."""
@@ -273,76 +97,17 @@ def dist_dot(km, r=None):
     return GREEN if km < 3 * s else ORANGE if km < 6 * s else RED
 
 
-def quality_dot(f, kind, r):
-    """How good the product itself is. TV points: 4K/8K +2, OLED +2, QLED/NanoCell +1 (not for budget brands),
-    ≥65" +2, ≥55" +1, 2020 or newer +1 → 🟢 ≥4 (55" OLED, 65" 4K, recent QLED), 🟠 2–3 (plain 4K), 🔴 ≤1 (Full HD,
-    HD, plasma, unknown). Monitor points: UWQHD/5K2K/DQHD/4K +2, QHD +1, ≥100Hz +1, USB‑C +1; a wanted model is 🟢."""
-    res = f["res"] or ""
-    if kind == "tv":
-        if f["panel"] == "PLASMA":
-            return RED
-        budget = bool(prices.BUDGET.search(f"{f['brand']} {r.get('title') or ''}"))
-        pts = 2 * (res in ("4K", "8K")) + 2 * (f["panel"] == "OLED") + \
-            ((f["nano"] or f["panel"] == "QLED") and not budget) + \
-            (2 if (f["inch"] or 0) >= 65 else 1 if (f["inch"] or 0) >= 55 else 0) + \
-            (isinstance(f["year"], int) and f["year"] >= 2020)
-    else:
-        if WANTED.search(f"{r.get('title') or ''} {r.get('model') or ''} {(r.get('ai') or {}).get('model') or ''}"):
-            return GREEN
-        pts = (2 if res in ("UWQHD", "5K2K", "DQHD", "4K") else 1 if res == "QHD" else 0) + \
-            ((f["hz"] or 0) >= 100) + bool(f["usbc_w"])
-    return GREEN if pts >= (4 if kind == "tv" else 3) else ORANGE if pts >= 2 else RED
-
-
 def price_dot(p, fair_v):
-    """🟢 at most 60 % of the recommended price, 🟠 up to 90 %, 🔴 above."""
+    """🟢 at most 60 % of the estimated value, 🟠 up to 90 %, 🔴 above."""
     if p is None or not fair_v:
         return ORANGE
     q = p / fair_v
     return GREEN if q <= 0.6 else ORANGE if q <= 0.9 else RED
 
 
-WANTED = re.compile(next((ru["models"] for ru in json.loads(RULES_P.read_text(encoding="utf-8"))["rules"]
-                          if ru.get("models")), "$^"), re.I)
-
-
-MON_BRANDS = re.compile(r"\b(dell|alienware|lg|samsung|asus|acer|aoc|benq|hp|iiyama|philips|msi|lenovo|viewsonic|"
-                        r"gigabyte|eizo|xiaomi|huawei|koorui|fujitsu|nec|medion|sony|apple|corsair|cooler master|"
-                        r"lc-?power|hannspree|sharp|dough|gamemax|pixio|razer|mobiuz|titan army)\b", re.I)
-BRAND_NAME = {"lg": "LG", "aoc": "AOC", "hp": "HP", "msi": "MSI", "tcl": "TCL", "jvc": "JVC", "benq": "BenQ",
-              "iiyama": "iiyama", "nec": "NEC", "lc-power": "LC-Power", "lcpower": "LC-Power", "bang": "B&O"}
-RES_PX = {"UWQHD": "3440×1440", "UWFHD": "2560×1080", "QHD": "2560×1440", "4K": "3840×2160", "5K2K": "5120×2160",
-          "FHD": "1920×1080", "DQHD": "5120×1440", "DFHD": "3840×1080", "HD": "1366×768"}
-CURVED = re.compile(r"curved|gebogen|\bcurve\b|\bcurvo\b|\bC\d{2}[A-Z]", re.I)
-
-
-def facts(r, kind):
-    """Specs for the push: the AI's answer first (it saw the photos and looked the model up), the listing's own
-    parse filling the gaps. guess = resolution not confirmed (inferred from the year / low AI confidence)."""
-    a = r.get("ai") or {}
-    def g(f):
-        return a.get(f) if a.get(f) not in (None, "") else r.get(f)
-    text = f"{r.get('title') or ''} {a.get('model') or ''} {r.get('model') or ''}"
-    b = (re.search(rf"\b({tv.BRANDS})\b", text, re.I) if kind == "tv" else MON_BRANDS.search(text))
-    brand = (b.group(1) if b else r.get("brand") or "").lower()
-    if brand.startswith(("overig", "other", "onbekend", "merkloos")):  # Marktplaats' "Overige merken" = no brand
-        brand = ""
-    usbc_w = a.get("usbc_w") or (int(m.group(1)) if (m := re.search(r"(\d+)W", r.get("usbc") or "")) else None)
-    return {"brand": BRAND_NAME.get(brand.replace(" ", ""), brand.title()) if brand else "",
-            "inch": g("inch"), "res": g("res"), "panel": g("panel"), "hz": g("hz"), "smart": g("smart"),
-            "year": g("year"), "usbc_w": usbc_w,
-            "guess": bool(r.get("res_guess")) or a.get("confidence") == "baja",
-            "nano": bool(prices.NANO.search(text)), "curved": bool(CURVED.search(f"{text} {r.get('desc') or ''}")),
-            "uw": bool(r.get("ultrawide")) or (g("res") or "").startswith(("UW", "5K2K", "D"))}
-
-
-def inch_s(f):
-    return f"{f['inch']:g}\"" if isinstance(f["inch"], (int, float)) else ""
-
-
 LINE = 36  # characters that fit on one line of the ntfy notification on the phone
-TITLE_W = 35  # columns after the 🖥️/📺 icon the app adds; the title is bold, so fewer fit: measured on the phone,
-#               columns) still fit but the ⛔ after it (39) wrapped to a second line
+TITLE_W = 35  # columns after the icon the app adds; the title is bold, so fewer fit: measured on the phone,
+#               '…QLED ·' (37 columns) still fit but the ⛔ after it (39) wrapped to a second line
 
 
 def width(s):
@@ -351,48 +116,29 @@ def width(s):
     return sum(0 if c in "️‍" else 2 if ord(c) >= 0x1F000 or c in "⚠⛔❓✅⭐⚡" else 1 for c in s)
 
 
-def headline(f, kind, room):
-    """Short title part, brand + the facts that matter most, dropping the least important ones to fit `room`
-    characters ('LG 55" 4K NanoCell Smart', 'MSI 34" ultrawide USB‑C')."""
-    res = (f["res"] or "") + ("?" if f["res"] and f["guess"] else "")
-    if kind == "tv":
-        panel = "NanoCell" if f["nano"] else {"OLED": "OLED", "QLED": "QLED", "PLASMA": "Plasma"}.get(f["panel"], "")
-        top = panel in ("OLED", "QLED", "NanoCell") and res.startswith("4K")  # these imply 4K: keep the panel
-        bits = [(f["brand"] or "TV", 0), (inch_s(f), 0), (res, 2 if top else 1), (panel, 1 if top else 2),
-                ("Smart" if f["smart"] else "", 3)]
-    else:
-        bits = [(f["brand"] or "Monitor", 0), (inch_s(f), 0), ("ultrawide" if f["uw"] else res, 1),
-                ("USB‑C" if f["usbc_w"] else "", 2), ("curved" if f["curved"] else "", 3)]
-    bits = [(x, k) for x, k in bits if x]
+def headline(f, K, r, room):
+    """Short title part from the kind's headline_bits (brand + the facts that matter most), dropping the least
+    important ones to fit `room` columns ('LG 55" 4K NanoCell Smart', 'MSI 34" ultrawide USB‑C')."""
+    bits = [(x, k) for x, k in K.headline_bits(f, r) if x]
     while width(" ".join(x for x, _ in bits)) > room and any(k for _, k in bits):
         worst = max(k for _, k in bits)
         bits = [(x, k) for x, k in bits if k != worst]
     return " ".join(x for x, _ in bits)[:room]
 
 
-def spec_line(f, kind, r):
+def spec_line(f, K, r):
     """'🟢 34" · 3440×1440 (UWQHD) · 100Hz · VA · USB‑C 65W · curved' / '🟢 55" · 4K · OLED · Smart · 2018'
     (may wrap to a second line on the phone)."""
-    q = "?" if f["guess"] else ""
-    if kind == "tv":
-        bits = [inch_s(f), (f["res"] or "res ?") + (q if f["res"] else ""),
-                "NanoCell" if f["nano"] else f["panel"] or "", "Smart" if f["smart"] else "",
-                f"{f['hz']}Hz" if f["hz"] and f["hz"] > 60 else "", str(f["year"] or "")]
-    else:
-        res = f["res"] or ""
-        bits = [inch_s(f), f"{RES_PX[res]} ({res}){q}" if res in RES_PX else res + q if res else "res ?",
-                f"{f['hz']}Hz" if f["hz"] else "", f["panel"] or "",
-                f"USB‑C {f['usbc_w']}W" if f["usbc_w"] else "", "curved" if f["curved"] else "", str(f["year"] or "")]
-    return quality_dot(f, kind, r) + " " + " · ".join(x for x in bits if x)
+    return K.quality_dot(f, r) + " " + " · ".join(x for x in K.spec_bits(f, r) if x)
 
 
-def price_line(r, kind):
+def price_line(r, K, sev):
     """'🟢 Worth ~€241 · New €400 (−88%)', always one phone line: the estimated second-hand value ('~': our own
     estimate, not a real price), then the real new price (models.json / the AI / the new-today estimate) and how far
     the asking price is below it. The discount is dropped if the line would still not fit."""
     p = r.get("price")
-    new = r.get("new_price") or prices.new_of(r, kind)
-    f = prices.fair(r, kind, severity(r))
+    new = r.get("new_price") or prices.new_of(r, K)
+    f = prices.fair(r, K, sev)
     parts = [f"Worth ~€{f:.0f}"] if f else []
     if new:
         d = round((1 - p / new) * 100) if p else None
@@ -411,58 +157,55 @@ def bids(r):
     return f"{n} bid{'s' if n > 1 else ''} already · highest €{r['top_bid']:.0f}"
 
 
-def describe(rule, r, tag=""):
-    return finish(r, tag, "monitor")
+def damage_line(r, K, sev):
+    """'⚠️ Light damage: dead pixels ⚠️' / '⛔ Badly broken: cracked screen ⛔', always one phone line."""
+    en = K.damage_en(r, sev, db.NEG) or "check the listing"
+    sym, lab = ("⛔", "Badly broken") if sev == "heavy" else ("⚠️", "Light damage")
+    room = LINE - width(f"{sym} {lab}:  {sym}")  # one phone line, so the closing symbol never wraps alone
+    while width(en) > room and ", " in en:  # drop the least important faults first
+        en = en.rsplit(", ", 1)[0]
+    if width(en) > room:
+        en = en[:room - 1].rstrip(" ,") + "…"
+    return f"{sym} {lab}: {en} {sym}"
 
 
-def describe_tv(rule, r, tag=""):
-    return finish(r, tag, "tv")
-
-
-def finish(r, tag, kind):
-    """Title 'P93 · €150 · LG 55" 4K NanoCell Smart [❓]' (the app adds the 🖥️/📺 icon; damage ⚠️/⛔ goes only
+def finish(r, tag, K):
+    """Title 'P93 · €150 · LG 55" 4K NanoCell Smart [❓]' (the app adds the kind's icon; damage ⚠️/⛔ goes only
     on the line right under it), then one line each: damage (only if any), bids (only if any), specs, price,
     distance, and the AI / not-sure notes."""
-    sev = severity(r)
-    f = facts(r, kind)
+    K = kinds.get(K)
+    sev = K.severity(r)
+    f = K.facts(r)
     p = r.get("price")
     price = f"€{p:.0f}" if p else "free" if r.get("ptype") == "FREE" else "no price"
-    head = f"{prices.tag(PRICE_REF, r, kind, sev) or 'P?'} · {price} · "
+    head = f"{prices.tag(PRICE_REF, r, K, sev) or 'P?'} · {price} · "
     room = TITLE_W - width(head) - (3 if tag else 0)  # ' ❓'
-    title = head + headline(f, kind, room)
-    dmg = ""
-    if sev:
-        en = damage_en(r, sev) or "check the listing"
-        sym, lab = ("⛔", "Badly broken") if sev == "heavy" else ("⚠️", "Light damage")
-        room = LINE - width(f"{sym} {lab}:  {sym}")  # one phone line, so the closing symbol never wraps alone
-        while width(en) > room and ", " in en:  # drop the least important faults first
-            en = en.rsplit(", ", 1)[0]
-        if width(en) > room:
-            en = en[:room - 1].rstrip(" ,") + "…"
-        dmg = f"{sym} {lab}: {en} {sym}"
+    title = head + headline(f, K, r, room)
+    dmg = damage_line(r, K, sev) if sev else ""
     if tag:
         title += " ❓"
     a = ai.line(r)
     if tag and not r.get("ai"):
-        a = "❓ Size or resolution unknown and could not be checked"
+        a = K.UNSURE
     elif tag:
         a = (a + "\n" if a else "") + "❓ The AI is not fully sure: have a look"
-    lines = [dmg, bids(r), spec_line(f, kind, r), price_line(r, kind), where(r), a]
+    lines = [dmg, bids(r), spec_line(f, K, r), price_line(r, K, sev), where(r), a]
     return title, "\n".join(x for x in lines if x)
 
 
-def heavy_gate(cfg, r, kind):
+# ---------------------------------------------------------------- checks before a push
+def heavy_gate(cfg, r, K):
     """Heavily damaged listings only notify when they are still an exceptional deal at 10 % of the fair value."""
-    if severity(r) != "heavy":
+    if K.severity(r) != "heavy":
         return True
-    pc = prices.percentile(PRICE_REF, r, kind, "heavy")
+    pc = prices.percentile(PRICE_REF, r, K, "heavy")
     return pc is None or pc >= cfg.get("heavy_min_percentile", 70)
 
 
-def gate(cfg, s, hits, kind):
+def gate(cfg, s, hits, K):
     out = []
     for ru, r, tag in hits:
-        if heavy_gate(cfg, r, kind):
+        if heavy_gate(cfg, r, K):
             out.append((ru, r, tag))
         else:
             s["alerted"][r["id"]] = {"at": now(), "skipped": "heavy damage, below heavy_min_percentile", "rule": ru["name"]}
@@ -475,12 +218,13 @@ LOWBALL_MAX = 2.0  # look at "bieden vanaf" listings asking up to 2 × a rule's 
 LOWBALL_EST = 1.5  # realistic price = min(1.5 × highest bid, or 1.5 × minimum bid if none, asking price)
 
 
-def lowball(cfg, s, pool, hit_ids, tv_kind, limit=3):
+def lowball(cfg, s, pool, hit_ids, K, limit=3):
     """Listings asking more than the rule allows but taking bids, whose realistic price still fits it:
     min(1.5 × highest bid (or minimum bid when nobody bid), asking price) strictly under the limit. E.g. €110 limit:
     "Vraagprijs €175, bieden vanaf €60" → ~€90 notifies; "bieden vanaf €100" → ~€150 does not. The minimum bid is only
     on the listing page, so at most `limit` new candidates per run are opened (a few seconds apart), each once."""
-    rule_of = (lambda r: tv_first_rule(cfg, r)) if tv_kind else (lambda r: first_rule(cfg, r))
+    def rule_of(r):
+        return K.first_rule(cfg, r)
     done = s.setdefault("lowball_checked", {})
     cand = [r for r in pool if r.get("ptype") == "MIN_BID" and r.get("price") and r["id"] not in s["alerted"]
             and r["id"] not in done and r["id"] not in hit_ids and not rule_of(r)
@@ -503,9 +247,9 @@ def lowball(cfg, s, pool, hit_ids, tv_kind, limit=3):
         est = min(LOWBALL_EST * (d.get("top_bid") or mb), r["price"])
         r2 = dict(r, desc=d["desc"] or r.get("desc"), n_bids=d["n_bids"], top_bid=d["top_bid"], views=d["views"],
                   imgs=r.get("imgs") or d.get("imgs"), ask=r["price"], min_bid=mb, price=est)
-        r2 = tv.parse(r2) if tv_kind else db.enrich(r2)
+        r2 = K.parse(r2)
         ru = rule_of(r2)
-        if ru and est < ru.get("max_price", float("inf")) * price_factor(cfg, r2):  # strictly under the limit
+        if ru and est < ru.get("max_price", float("inf")) * K.price_factor(cfg, r2):  # strictly under the limit
             out.append((ru, r2))
             print(f"  LOWBALL [{ru['name']}] pide €{r['price']:.0f}, puja mín €{mb:.0f}, estimado €{est:.0f}: {r['title'][:60]}")
         else:
@@ -515,7 +259,7 @@ def lowball(cfg, s, pool, hit_ids, tv_kind, limit=3):
     return out
 
 
-def verify_hits(cfg, s, hits, tv_kind):
+def verify_hits(cfg, s, hits, K):
     """Before notifying, read the full listing: the search API only returns the first ~250 characters of the
     description, and defects ("valt donkerder uit", "krassen") are often further down. A hit whose full text
     no longer passes its rules is marked as handled without a push. A failed fetch keeps the hit (better a push
@@ -532,15 +276,10 @@ def verify_hits(cfg, s, hits, tv_kind):
                 continue
             out.append((ru, r))
             continue
-        r = dict(r, desc=d["desc"] or r.get("desc"), n_bids=d["n_bids"], top_bid=d["top_bid"], views=d["views"],
-                 imgs=r.get("imgs") or d.get("imgs"))
-        if tv_kind:
-            r = tv.parse(r)
-            ru2 = tv_first_rule(cfg, r)
-        else:
-            r = db.enrich(r)
-            ru2 = first_rule(cfg, r)
-        if ru2 or (WARN_DAMAGE and severity(r) != "heavy"):  # warn mode: keep it, the push says LIGHT/HEAVY
+        r = K.parse(dict(r, desc=d["desc"] or r.get("desc"), n_bids=d["n_bids"], top_bid=d["top_bid"],
+                         views=d["views"], imgs=r.get("imgs") or d.get("imgs")))
+        ru2 = K.first_rule(cfg, r)
+        if ru2 or (WARN_DAMAGE and K.severity(r) != "heavy"):  # warn mode: keep it, the push shows the damage
             out.append((ru2 or ru, r))
         else:
             s["alerted"][r["id"]] = {"at": now(), "skipped": "full description fails the rules", "rule": ru["name"]}
@@ -550,40 +289,6 @@ def verify_hits(cfg, s, hits, tv_kind):
 
 
 # ---------------------------------------------------------------- AI second opinion (ai.py, DeepSeek)
-GUESS_INCH = {"UWQHD": 34, "5K2K": 34, "4K": 32, "QHD": 32}
-
-
-def maybe_rule(cfg, r, tv_kind):
-    """A rule the listing would match if a fact it does not state turned out favourable (TV resolution or Smart,
-    monitor size or resolution). These are the 'not sure' listings the AI looks up."""
-    if tv_kind:
-        if r.get("panel") == "PLASMA" or "plasma" in (r.get("title") or "").lower():
-            return None  # plasmas are never 4K
-        v = dict(r)
-        if not r.get("res") or r.get("res_guess"):
-            v["res"] = "4K"
-        if not r.get("smart") and not re.search(r"geen smart|niet smart", f"{r.get('title')} {r.get('desc')}", re.I):
-            v["smart"] = True
-        return tv_first_rule(cfg, v) if v != r else None
-    if r.get("inch") and r["inch"] >= cfg.get("min_inch", 0) and not r.get("res"):
-        for res in GUESS_INCH:
-            if ru := first_rule(cfg, dict(r, res=res)):
-                return ru
-    if r.get("res") in GUESS_INCH and not r.get("inch"):
-        return first_rule(cfg, dict(r, inch=GUESS_INCH[r["res"]]))
-    if not r.get("inch") and not r.get("res") and not SMALL_HINT.search(r.get("title") or ""):
-        # neither size nor resolution in the text ("LG curved monitor, perfecte staat"): only the photos tell
-        for res, inch in GUESS_INCH.items():
-            if ru := first_rule(cfg, dict(r, inch=inch, res=res)):
-                return ru
-    return None
-
-
-# too small to be worth an AI call: "AOC27", "HP E27", "24 inch", model codes W2234S / P2252HS / RG240Y, portables
-SMALL_HINT = re.compile(r"(?<!\d)(1[5-9]|2[0-9])(?!\d)|[a-z](1[5-9]|2[0-7])\d{1,2}[a-z]{0,2}\b|"
-                        r"portable|draagba|zenscreen|\bcm\b|beugel|carelink|cisco", re.I)
-
-
 def ai_budget(cfg, s):
     a = cfg.get("ai") or {}
     if not a.get("enabled", True) or not ai.key():
@@ -596,12 +301,10 @@ def ai_budget(cfg, s):
     return max(0, min(a.get("max_per_run", 6), a.get("max_per_day", 150) - d["n"]))
 
 
-def ai_pass(cfg, s, hits, unsure, tv_kind):
+def ai_pass(cfg, s, hits, unsure, K):
     """Ask the AI about every hit and every 'not sure' listing (hits first, within the budget). Returns the list of
     (rule, listing, tag) to notify: tag '' = rule confirmed, '❓' = still not sure (notified anyway, the user prefers
     one push too many over a miss). 'Not sure' listings that the AI shows do not fit are dropped quietly."""
-    kind = "tv" if tv_kind else "monitor"
-    rule_of = (lambda r: tv_first_rule(cfg, r)) if tv_kind else (lambda r: first_rule(cfg, r))
     todo = [("hit", ru, r) for ru, r in hits] + [("unsure", ru, r) for ru, r in unsure]
     n = ai_budget(cfg, s)
     asked = todo[:n]
@@ -609,7 +312,7 @@ def ai_pass(cfg, s, hits, unsure, tv_kind):
     if asked:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=4) as ex:
-            answers = list(ex.map(lambda x: ai.ask(x[2], kind), asked))
+            answers = list(ex.map(lambda x: ai.ask(x[2], K), asked))
         s["ai_day"]["n"] += len(asked)
         s.setdefault("today", {})["ai"] = s.get("today", {}).get("ai", 0) + len(asked)
     out = []
@@ -617,14 +320,14 @@ def ai_pass(cfg, s, hits, unsure, tv_kind):
         a = answers[i] if i < len(answers) else None
         if what == "unsure" and i >= len(asked):
             continue  # over budget: stays unchecked, retried next run
-        r2 = ai.apply(r, a, kind)
+        r2 = ai.apply(r, a, K)
         if a:
             u = a.get("usage") or {}
             print(f"  AI {r['id']} {what}: {a.get('model')} {a.get('res')} new €{a.get('new_price_eur')} "
                   f"({a.get('confidence')}) · tokens in {u.get('prompt_tokens')} out {u.get('completion_tokens')}")
-        ru2 = rule_of(r2)
+        ru2 = K.first_rule(cfg, r2)
         if what == "hit":
-            if not ru2 and severity(r2) == "heavy":  # the AI found heavy damage: must cost ≤ 50 % of the limit
+            if not ru2 and K.severity(r2) == "heavy":  # the AI found heavy damage: must cost ≤ 50 % of the limit
                 s["alerted"][r["id"]] = {"at": now(), "skipped": "heavy damage over the 50 % limit", "rule": ru["name"]}
                 log(f"SKIP heavy [{ru['name']}] {r['id']} {r.get('title')!r}: {(a or {}).get('defects')}")
                 continue
@@ -633,7 +336,7 @@ def ai_pass(cfg, s, hits, unsure, tv_kind):
         s.setdefault("ai_checked", {})[r["id"]] = {"at": now(), "ok": bool(ru2), "ai": bool(a)}
         if ru2:
             out.append((ru2, r2, ""))
-        elif not a or maybe_rule(cfg, r2, tv_kind):  # AI failed or still could not tell
+        elif not a or K.maybe_rule(cfg, r2):  # AI failed or still could not tell
             out.append((ru, r2, "❓"))
         else:
             log(f"AI-NO [{ru['name']}] {r['id']} {r.get('title')!r}: {a.get('model')} {a.get('res')} {a.get('inch')}\"")
@@ -642,77 +345,62 @@ def ai_pass(cfg, s, hits, unsure, tv_kind):
 
 # ---------------------------------------------------------------- state
 def load_state():
-    return hunt.load(STATE_P, {"alerted": {}, "pause_until": None, "backoff_h": 1, "seeded": False})
+    s = hunt.load(STATE_P, {"alerted": {}, "pause_until": None, "backoff_h": 1, "seeded": False})
+    # before kinds/ the monitor counters had no prefix (TVs already used tv_…)
+    if "seen_ids" in s:
+        s.setdefault("monitor_seen_ids", s.pop("seen_ids"))
+    d = s.get("today") or {}
+    for a, b in (("new", "monitor_new"), ("alerts", "monitor_alerts")):
+        if a in d:
+            d.setdefault(b, d.pop(a))
+    return s
 
 
 def save_state(s):
     hunt.save(STATE_P, s)
 
 
-def active_rows(c):
-    return [dict(r) for r in c.execute("SELECT * FROM listings WHERE active=1").fetchall()]
-
-
-def seed(s, cfg, rows):
+def seed(s, cfg, pools):
+    """pools: [(Kind, listings)]."""
     n = 0
-    for r in rows:
-        ru = first_rule(cfg, r)
-        if ru and r["id"] not in s["alerted"]:
-            s["alerted"][r["id"]] = {"at": now(), "rule": ru["name"], "price": r.get("price"), "seeded": True}
-            n += 1
+    for K, rows in pools:
+        for r in rows:
+            ru = K.first_rule(cfg, r)
+            if ru and r["id"] not in s["alerted"]:
+                s["alerted"][r["id"]] = {"at": now(), "kind": K.name, "rule": ru["name"], "price": r.get("price"),
+                                         "seeded": True}
+                n += 1
     s["seeded"] = True
     return n
 
 
 # ---------------------------------------------------------------- commands
-def fetch_newest():
-    rows = {}
-    base = {"l1CategoryId": 322, "l2CategoryIds": 336, "distanceMeters": hunt.CFG["radius_km"] * 1000,
-            "limit": 100, "offset": 0, "sortBy": "SORT_INDEX", "sortOrder": "DECREASING",
-            "viewOptions": "list-view", "attributeRanges[]": f"PriceCents:null:{hunt.CFG['max_price'] * 100}"}
-    for i, (city, pc) in enumerate(hunt.CFG["centers"].items()):
-        if i:
-            time.sleep(random.uniform(3, 6))
-        j = hunt.mp_get(dict(base, postcode=pc, distanceMeters=hunt.radius_m(city)))
-        for x in j.get("listings") or []:
-            r = hunt.mp_row(x)
-            r["near"] = city
-            if r["id"] in rows:  # found around both centers
-                old = rows[r["id"]]
-                r["near"] = f"{old['near']},{city}"
-                r["km"] = min(old["km"], r["km"])
-            rows[r["id"]] = r
-    out = []
-    for r in rows.values():
-        if db.keep(r):
-            r = dict(r)
-            r["posted"] = r.pop("date")
-            out.append(r)
-    return out
-
-
-def fetch_tvs(cfg):
-    """Newest page of Televisies per center (2 more API calls), parsed by tv.py."""
-    rows = {}
-    mx = (cfg.get("tv") or {}).get("fetch_max_price", 250)
-    for city, pc in hunt.CFG["centers"].items():
-        time.sleep(random.uniform(3, 6))
-        j = hunt.mp_get({"l1CategoryId": tv.L1, "l2CategoryIds": tv.L2, "limit": 100, "offset": 0, "postcode": pc,
-                         "distanceMeters": hunt.radius_m(city), "viewOptions": "list-view",
-                         "sortBy": "SORT_INDEX", "sortOrder": "DECREASING", "attributeRanges[]": f"PriceCents:null:{mx * 100}"})
-        for x in j.get("listings") or []:
-            r = hunt.mp_row(x)
-            r["near"] = city
-            if r["id"] in rows:
-                r["near"] = f"{rows[r['id']]['near']},{city}"
-                r["km"] = min(rows[r["id"]]["km"], r["km"])
-            rows[r["id"]] = r
-    return [tv.parse(r) for r in rows.values()]
+def check(cfg, s, K, pool):
+    """Rules → full description → 'not sure' listings → bid listings → AI → heavy-damage gate, for one kind."""
+    rules = K.cfg.get("rules", [])
+    hits = [(ru, r) for r in pool if r["id"] not in s["alerted"] and (ru := K.first_rule(cfg, r))]
+    hits.sort(key=lambda h: rules.index(h[0]))
+    hits = verify_hits(cfg, s, hits, K)
+    checked = s.setdefault("ai_checked", {})
+    hit_ids = {x["id"] for _, x in hits}
+    unsure = [(ru, r) for r in pool if r["id"] not in s["alerted"] and r["id"] not in checked
+              and r["id"] not in hit_ids and not K.first_rule(cfg, r) and (ru := K.maybe_rule(cfg, r))]
+    n_ai = ai_budget(cfg, s) - len(hits)
+    unsure = verify_hits(cfg, s, unsure[:n_ai], K) if n_ai > 0 else []
+    keep_u = []
+    for ru, r in unsure:  # the full description already settles it ("24 inch"): no AI call needed
+        if K.first_rule(cfg, r) or K.maybe_rule(cfg, r):
+            keep_u.append((ru, r))
+        else:
+            checked[r["id"]] = {"at": now(), "ok": False, "ai": False}
+    if cfg.get("lowball"):
+        hits += lowball(cfg, s, pool, hit_ids | {x["id"] for _, x in keep_u}, K)
+    return gate(cfg, s, ai_pass(cfg, s, hits, keep_u, K), K)
 
 
 def cmd_run(args):
     cfg, s = conf(), load_state()
-    rules = cfg["rules"]
+    ks = kinds.enabled()
     cloud = "--cloud" in args or os.environ.get("GITHUB_ACTIONS") == "true"
     print(f"distance points: {len(POINTS)} ({sum(1 for p in POINTS if p.get('work'))} work)")  # no coordinates logged
     t = dt.datetime.now()
@@ -723,8 +411,7 @@ def cmd_run(args):
         if s.get("pause_until") and t.isoformat() < s["pause_until"]:
             return print(f"paused until {s['pause_until']} after an HTTP error")
     try:
-        rows = fetch_newest()
-        tvs = fetch_tvs(cfg) if (cfg.get("tv") or {}).get("enabled") else []
+        raw = {K.name: K.fetch() for K in ks}
     except Exception as e:  # noqa: BLE001  (403/429/5xx/timeouts: back off, never hammer)
         h = s.get("backoff_h", 1)
         s["pause_until"] = (t + dt.timedelta(hours=h)).isoformat(timespec="minutes")
@@ -737,194 +424,123 @@ def cmd_run(args):
     s.pop("price_hist", None)  # old formats ([price, new] pairs)
     s.pop("value_hist", None)
     hist = s.setdefault("value_ref", {})
-    for r in rows:  # every listing seen grows the reference for the percentile
-        prices.add(hist, db.enrich(dict({k: None for k in db.COLS}, **r)), "monitor")
-    for r in tvs:
-        prices.add(hist, r, "tv")
+    parsed = {K.name: [K.parse(r) for r in raw[K.name]] for K in ks}
+    for K in ks:  # every listing seen grows the reference for the percentile
+        for r in parsed[K.name]:
+            prices.add(hist, r, K)
     for g in hist:  # keep the state small: newest 5000 per kind
         if len(hist[g]) > 5000:
             hist[g] = dict(list(hist[g].items())[-5000:])
     PRICE_REF = prices.load(hist)
-    if cloud:  # no database in the cloud: rules run on the newest listings only
-        pool = [db.enrich(dict({k: None for k in db.COLS}, **r)) for r in rows]
-        prev = set(s.get("seen_ids", []))
-        new_rows = [r for r in pool if r["id"] not in prev] if prev else []
-        n_new = len(new_rows)
-        s["seen_ids"] = [r["id"] for r in pool]
-    else:  # every active listing, so matches found by `db.py sync` or a price drop also notify
-        c = db.con()
-        n_new = db.upsert(c, rows)
-        pool = active_rows(c)
+    runs = []  # (Kind, pool, new listings, number new, notified)
+    for K in ks:
+        pool, new_rows, n_new = K.pool(raw[K.name], parsed[K.name], cloud, s)
+        runs.append([K, pool, new_rows, n_new, []])
     if not s.get("seeded"):
-        n = seed(s, cfg, pool)
+        n = seed(s, cfg, [(K, pool) for K, pool, *_ in runs])
         save_state(s)
         log(f"seeded {n} existing matches (no notification)")
         return print(f"first run: {n} current matches marked as seen; from now on only new ones notify")
-    hits = []
-    for r in pool:
-        if r["id"] in s["alerted"]:
-            continue
-        ru = first_rule(cfg, r)
-        if ru:
-            hits.append((ru, r))
-    hits.sort(key=lambda h: rules.index(h[0]))
-    hits = verify_hits(cfg, s, hits, tv_kind=False)
-    checked = s.setdefault("ai_checked", {})
-    hit_ids = {x["id"] for _, x in hits}
-    unsure = [(ru, r) for r in pool if r["id"] not in s["alerted"] and r["id"] not in checked
-              and r["id"] not in hit_ids and not first_rule(cfg, r) and (ru := maybe_rule(cfg, r, False))]
-    n_ai = ai_budget(cfg, s) - len(hits)
-    unsure = verify_hits(cfg, s, unsure[:n_ai], tv_kind=False) if n_ai > 0 else []
-    keep_u = []
-    for ru, r in unsure:  # the full description already settles it ("24 inch"): no AI call needed
-        if first_rule(cfg, r) or maybe_rule(cfg, r, False):
-            keep_u.append((ru, r))
-        else:
-            checked[r["id"]] = {"at": now(), "ok": False, "ai": False}
-    if cfg.get("lowball"):
-        hits += lowball(cfg, s, pool, hit_ids | {x["id"] for _, x in keep_u}, tv_kind=False)
-    hits = gate(cfg, s, ai_pass(cfg, s, hits, keep_u, tv_kind=False), "monitor")
     shown = 0
-    for ru, r, tag in hits:
-        title, body = describe(ru, r, tag)
-        if shown < cfg.get("max_toasts", 4):
-            notify.toast(title, body, r["url"])
-            shown += 1
-        notify.ntfy(cfg.get("ntfy_topic"), title, body, r["url"])
-        s["alerted"][r["id"]] = {"at": now(), "rule": ru["name"], "price": r.get("price"), "unsure": bool(tag)}
-        log(f"ALERT{' ' + tag if tag else ''} [{ru['name']}] {r['id']} €{r.get('price')} {r.get('model') or r['title']!r} {r.get('city')} {r['url']}")
-    # TVs: no database, the newest page per center is the pool; every match not yet notified fires once
-    tv_prev = set(s.get("tv_seen_ids", []))
-    tv_new = [r for r in tvs if r["id"] not in tv_prev]
-    s["tv_seen_ids"] = [r["id"] for r in tvs]
-    tv_rules = (cfg.get("tv") or {}).get("rules", [])
-    tv_hits = [(ru, r) for r in tvs if r["id"] not in s["alerted"] and (ru := tv_first_rule(cfg, r))]
-    tv_hits.sort(key=lambda h: tv_rules.index(h[0]))
-    tv_hits = verify_hits(cfg, s, tv_hits, tv_kind=True)
-    hit_ids = {x["id"] for _, x in tv_hits}
-    tv_unsure = [(ru, r) for r in tvs if r["id"] not in s["alerted"] and r["id"] not in checked
-                 and r["id"] not in hit_ids and not tv_first_rule(cfg, r) and (ru := maybe_rule(cfg, r, True))]
-    n_ai = ai_budget(cfg, s) - len(tv_hits)
-    tv_unsure = verify_hits(cfg, s, tv_unsure[:n_ai], tv_kind=True) if n_ai > 0 else []
-    if cfg.get("lowball"):
-        tv_hits += lowball(cfg, s, tvs, hit_ids | {x["id"] for _, x in tv_unsure}, tv_kind=True)
-    tv_hits = gate(cfg, s, ai_pass(cfg, s, tv_hits, tv_unsure, tv_kind=True), "tv")
-    for ru, r, tag in tv_hits:
-        title, body = describe_tv(ru, r, tag)
-        if shown < cfg.get("max_toasts", 4):
-            notify.toast(title, body, r["url"])
-            shown += 1
-        notify.ntfy(cfg.get("ntfy_topic_tv"), title, body, r["url"], tag="tv")
-        s["alerted"][r["id"]] = {"at": now(), "rule": ru["name"], "price": r.get("price"), "tv": True, "unsure": bool(tag)}
-        log(f"ALERT TV{' ' + tag if tag else ''} [{ru['name']}] {r['id']} €{r.get('price')} {r['title']!r} {r.get('city')} {r['url']}")
-    hits_all = hits + tv_hits
-    if len(hits_all) > shown:
-        notify.toast(f"🔔 +{len(hits_all) - shown} more alerts", "python -I alert.py log", "")
-    if hits_all:
+    for run in runs:
+        K, pool = run[0], run[1]
+        hits = run[4] = check(cfg, s, K, pool)
+        topic = cfg["topics"].get(K.name)
+        for ru, r, tag in hits:
+            title, body = finish(r, tag, K)
+            if shown < cfg.get("max_toasts", 4):
+                notify.toast(title, body, r["url"])
+                shown += 1
+            notify.ntfy(topic, title, body, r["url"], tag=K.icon)
+            s["alerted"][r["id"]] = {"at": now(), "kind": K.name, "rule": ru["name"], "price": r.get("price"),
+                                     "unsure": bool(tag)}
+            log(f"ALERT {K.name}{' ' + tag if tag else ''} [{ru['name']}] {r['id']} €{r.get('price')} "
+                f"{r.get('model') or r['title']!r} {r.get('city')} {r['url']}")
+    n_hits = sum(len(x[4]) for x in runs)
+    if n_hits > shown:
+        notify.toast(f"🔔 +{n_hits - shown} more alerts", "python -I alert.py log", "")
+    if n_hits:
         notify.sound()
     if cloud:
         day = dt.date.today().isoformat()
         d = s.setdefault("today", {})
         if d.get("date") != day:
             d.clear()
-            d.update(date=day, checks=0, new=0, alerts=0)
-        d["checks"] += 1
-        d["new"] += n_new
-        d["alerts"] += len(hits)
-        d["tv_new"] = d.get("tv_new", 0) + len(tv_new)
-        d["tv_alerts"] = d.get("tv_alerts", 0) + len(tv_hits)
-        if t.hour >= cfg.get("heartbeat_hour", 21) and s.get("heartbeat") != day and cfg.get("heartbeat", True):
-            notify.ntfy(cfg.get("ntfy_topic"), "✅ Monitor and TV alerts running",
-                        f"Today: {d['checks']} checks · monitors: {d['new']} new, {d['alerts']} alerts · "
-                        f"TVs: {d['tv_new']} new, {d['tv_alerts']} alerts · AI: {d.get('ai', 0)} lookups.", "", priority=2, tag=None)
+            d.update(date=day, checks=0)
+        d["checks"] = d.get("checks", 0) + 1
+        for K, pool, new_rows, n_new, hits in runs:
+            d[f"{K.name}_new"] = d.get(f"{K.name}_new", 0) + n_new
+            d[f"{K.name}_alerts"] = d.get(f"{K.name}_alerts", 0) + len(hits)
+        if t.hour >= cfg.get("heartbeat_hour", 21) and s.get("heartbeat") != day and cfg.get("heartbeat", True) and ks:
+            per = " · ".join(f"{K.plural}: {d.get(K.name + '_new', 0)} new, {d.get(K.name + '_alerts', 0)} alerts"
+                             for K in ks)
+            notify.ntfy(cfg["topics"].get(ks[0].name), "✅ " + " and ".join(K.label for K in ks) + " alerts running",
+                        f"Today: {d['checks']} checks · {per} · AI: {d.get('ai', 0)} lookups.", "", priority=2, tag=None)
             s["heartbeat"] = day
-        summary(cfg, pool, new_rows, hits, s)
-        summary_tv(cfg, tvs, tv_new, tv_hits)
+        summary(cfg, runs, s)
     save_state(s)
-    print(f"{now()}: {len(rows)} newest listings ({n_new} new), {len(hits)} alerts · "
-          f"TVs: {len(tvs)} newest ({len(tv_new)} new), {len(tv_hits)} alerts")
-    for ru, r, _ in hits + tv_hits:
-        print(f"  ALERT [{ru['name']}] €{r.get('price')} {(r.get('model') or r.get('title') or '')[:60]} · {r.get('city')} · {r['url']}")
+    print(f"{now()}: " + " · ".join(f"{K.plural}: {len(pool)} newest ({n_new} new), {len(hits)} alerts"
+                                    for K, pool, _, n_new, hits in runs))
+    for K, *_, hits in runs:
+        for ru, r, _ in hits:
+            print(f"  ALERT {K.name} [{ru['name']}] €{r.get('price')} {(r.get('model') or r.get('title') or '')[:60]} · "
+                  f"{r.get('city')} · {r['url']}")
 
 
-def summary_tv(cfg, tvs, tv_new, tv_hits):
-    out = os.environ.get("GITHUB_STEP_SUMMARY")
-    if not out or not tvs:
-        return
-    hit = {r["id"]: ru["name"] for ru, r, *_ in tv_hits}
-    L = ["", f"### 📺 Teles · {len(tvs)} revisadas · {len(tv_new)} nuevas · {len(tv_hits)} alertas", ""]
-    big = [r for r in tv_new if (r.get("inch") or 0) >= (cfg.get("tv") or {}).get("min_inch", 50)]
-    if big:
-        L += ["| Anuncio | Precio | Tamaño | Res. | Panel | Dónde | Resultado |", "|---|---|---|---|---|---|---|"]
-        for r in big[:40]:
-            ru = tv_first_rule(cfg, r)
-            res = f"📺 **{hit[r['id']]}**" if r["id"] in hit else (f"ya avisado ({ru['name']})" if ru else
-                                                                   "dañada/accesorio" if r.get("damage") or r.get("accessory") else "no cumple reglas")
-            price = "€%.0f" % r["price"] if r.get("price") else "—"
-            L.append(f"| [{r['title'][:60].replace('|', '/')}]({r['url']}) | {price} | {r['inch']}\" | {r.get('res') or '?'} | "
-                     f"{r.get('panel') or '?'} | {r.get('city') or '?'} {r.get('km') or 0} km | {res} |")
-    with open(out, "a", encoding="utf-8") as f:
-        f.write("\n".join(L) + "\n")
-
-
-def summary(cfg, pool, new_rows, hits, s):
-    """Markdown summary shown on the GitHub Actions run page."""
+def summary(cfg, runs, s):
+    """Markdown summary shown on the GitHub Actions run page: per kind, the new listings and what happened."""
     out = os.environ.get("GITHUB_STEP_SUMMARY")
     if not out:
         return
-    hit_ids = {r["id"]: ru["name"] for ru, r, *_ in hits}
-    L = [f"### {now()} · {len(pool)} anuncios revisados · {len(new_rows)} nuevos desde la revisión anterior · "
-         f"{len(hits)} alertas", ""]
-    if new_rows:
-        L += ["| Anuncio | Precio | Tamaño | Res. | Dónde | Resultado |", "|---|---|---|---|---|---|"]
-        for r in new_rows[:40]:
-            ru = first_rule(cfg, r)
-            res = f"🔔 **{hit_ids[r['id']]}**" if r["id"] in hit_ids else (f"ya avisado ({ru['name']})" if ru else "no cumple reglas")
-            title = (r.get("model") or r.get("title") or "")[:60].replace("|", "/")
-            price = "€%.0f" % r["price"] if r.get("price") else "—"
-            inch = '%g"' % r["inch"] if r.get("inch") else "?"
-            L.append(f"| [{title}]({r['url']}) | {price} | {inch} | {r.get('res') or '?'} | "
-                     f"{r.get('city') or '?'} {r.get('km') or 0} km | {res} |")
-    match_now = [(first_rule(cfg, r), r) for r in pool]
-    match_now = [(ru, r) for ru, r in match_now if ru]
-    L += ["", f"**Ahora mismo cumplen alguna regla {len(match_now)} de los {len(pool)} anuncios más nuevos:**", ""]
-    L += [f"- [{(r.get('model') or r['title'])[:60]}]({r['url']}) · €{r.get('price') or 0:.0f} · {ru['name']}"
-          for ru, r in match_now[:15]]
+    L = [f"## {now()}", ""]
+    for K, pool, new_rows, n_new, hits in runs:
+        hit = {r["id"]: ru["name"] for ru, r, *_ in hits}
+        L += [f"### {K.plural[:1].upper() + K.plural[1:]} · {len(pool)} revisados · {n_new} nuevos desde la revisión anterior · {len(hits)} alertas", ""]
+        shown = [r for r in new_rows if K.prefilter(cfg, r, True) or r["id"] in hit]
+        if shown:
+            cols = [c for c, _ in K.summary_cols(shown[0])]
+            L += ["| Anuncio | Precio | " + "".join(f"{c} | " for c in cols) + "Dónde | Resultado |",
+                  "|---|---|" + "---|" * len(cols) + "---|---|"]
+            for r in shown[:40]:
+                ru = K.first_rule(cfg, r)
+                res = f"🔔 **{hit[r['id']]}**" if r["id"] in hit else (f"ya avisado ({ru['name']})" if ru else
+                                                                      "dañado/accesorio" if r.get("damage") or r.get("accessory") else "no cumple reglas")
+                title = (r.get("model") or r.get("title") or "")[:60].replace("|", "/")
+                price = "€%.0f" % r["price"] if r.get("price") else "—"
+                L.append(f"| [{title}]({r['url']}) | {price} | " + "".join(f"{v} | " for _, v in K.summary_cols(r)) +
+                         f"{r.get('city') or '?'} {r.get('km') or 0} km | {res} |")
+        match_now = [(ru, r) for r in pool if (ru := K.first_rule(cfg, r))]
+        L += ["", f"**Ahora mismo cumplen alguna regla {len(match_now)} de los {len(pool)} anuncios:**", ""]
+        L += [f"- [{(r.get('model') or r['title'])[:60]}]({r['url']}) · €{r.get('price') or 0:.0f} · {ru['name']}"
+              for ru, r in match_now[:15]]
+        L.append("")
     d = s.get("today", {})
-    L += ["", f"Hoy: {d.get('checks', 0)} revisiones, {d.get('new', 0)} anuncios nuevos vistos, {d.get('alerts', 0)} alertas."]
+    L += [f"Hoy: {d.get('checks', 0)} revisiones · " +
+          " · ".join(f"{K.plural}: {d.get(K.name + '_new', 0)} nuevos, {d.get(K.name + '_alerts', 0)} alertas"
+                     for K, *_ in runs) + "."]
     with open(out, "a", encoding="utf-8") as f:
         f.write("\n".join(L) + "\n")
 
 
 def cmd_test(args):
-    cfg, c = conf(), db.con()
+    cfg = conf()
     global PRICE_REF
     PRICE_REF = prices.load()
-    rules = cfg["rules"]
-    by = {ru["name"]: [] for ru in rules}
-    for r in active_rows(c):
-        ru = first_rule(cfg, r)
-        if ru:
-            by[ru["name"]].append(r)
-    for name, rs in by.items():
-        print(f"\n## {name}: {len(rs)} active listings would match")
-        for r in sorted(rs, key=lambda r: r.get("price") or 0)[:6]:
-            t, b = describe(next(x for x in rules if x["name"] == name), r)
-            print(f"  €{r.get('price') or 0:>5.0f}  {b.replace(chr(10), ' | ')}  ({r['first_seen']})  {r['url']}")
-    files = sorted(hunt.DATA.glob("tv_*.json"))
-    if files and (cfg.get("tv") or {}).get("enabled"):  # TVs: last `python -I tv.py sweep`
-        tvs = [tv.parse(r) for r in hunt.load(files[-1], [])]
-        by = {ru["name"]: [] for ru in cfg["tv"]["rules"]}
-        for r in tvs:
-            ru = tv_first_rule(cfg, r)
+    for K in kinds.enabled():
+        rows = K.test_rows()
+        rules = K.cfg.get("rules", [])
+        by = {ru["name"]: [] for ru in rules}
+        for r in rows:
+            ru = K.first_rule(cfg, r)
             if ru:
                 by[ru["name"]].append(r)
-        print(f"\n# TVs from {files[-1].name} ({len(tvs)} listings)")
+        print(f"\n# {K.plural}: {len(rows)} listings")
         for name, rs in by.items():
-            print(f"\n## 📺 {name}: {len(rs)} would match")
-            for r in sorted(rs, key=lambda r: r.get("price") or 0)[:8]:
-                t, b = describe_tv(next(x for x in cfg["tv"]["rules"] if x["name"] == name), r)
-                print(f"  €{r.get('price') or 0:>5.0f}  {b.replace(chr(10), ' | ')}  ({r.get('date')}, {r.get('near')})  {r['url']}")
+            print(f"\n## {name}: {len(rs)} would match")
+            for r in sorted(rs, key=lambda r: r.get("price") or 0)[:6]:
+                t, b = finish(r, "", K)
+                seen = ", ".join(str(x) for x in (r.get("first_seen") or r.get("date"), r.get("near")) if x)
+                print(f"  €{r.get('price') or 0:>5.0f}  {b.replace(chr(10), ' | ')}  ({seen})  {r['url']}")
 
 
 def cmd_toast(args):
@@ -938,26 +554,23 @@ def cmd_toast(args):
 
 
 def cmd_ping(args):
-    """Two TEST pushes built by the real formatter (finish), so they show exactly what a real alert looks like."""
+    """One TEST push per kind built by the real formatter (finish), so it shows exactly what a real alert looks like."""
     cfg = conf()
-    mon = {"title": "iiyama 34 inch ultrawide", "price": 75, "ptype": "FIXED", "inch": 34, "res": "UWQHD",
-           "panel": "VA", "hz": 75, "usbc": "USB-C 65W", "ultrawide": True, "city": "Amsterdam", "km": 3.2,
-           "desc": "2 dode pixels rechtsboven, verder perfect", "damage": "dode pixels"}
-    tvr = {"title": "Samsung 65 inch QLED", "price": 20, "ptype": "FIXED", "inch": 65, "res": "4K", "panel": "QLED",
-           "smart": True, "year": 2019, "city": "Amsterdam", "km": 1.6,
-           "desc": "Scherm gebarsten na val, strepen in beeld", "damage": "roto/grieta"}
     ok = True
-    for topic, r, kind in ((cfg.get("ntfy_topic"), mon, "monitor"), (cfg.get("ntfy_topic_tv"), tvr, "tv")):
-        t, b = finish(r, "", kind)
+    for K in kinds.enabled():
+        r = K.sample()
+        if not r:
+            continue
+        t, b = finish(r, "", K)
         print(t, b, "", sep="\n")
-        ok = notify.ntfy(topic, t, b + "\n(TEST sample, not a real listing)", "https://www.marktplaats.nl",
-                         tag="tv" if kind == "tv" else "desktop_computer") and ok
+        ok = notify.ntfy(cfg["topics"].get(K.name), t, b + "\n(TEST sample, not a real listing)",
+                         "https://www.marktplaats.nl", tag=K.icon) and ok
     print("phone push sent" if ok else "phone push FAILED (is NTFY_TOPIC set?)")
 
 
 def cmd_seed(args):
-    s, c = load_state(), db.con()
-    print(f"{seed(s, conf(), active_rows(c))} matches marked as seen")
+    s, cfg = load_state(), conf()
+    print(f"{seed(s, cfg, [(K, K.test_rows()) for K in kinds.enabled()])} matches marked as seen")
     save_state(s)
 
 
