@@ -13,7 +13,6 @@ all checks for an hour (doubling up to 8 h while errors persist).
 """
 import datetime as dt
 import json
-import math
 import os
 import random
 import re
@@ -198,24 +197,7 @@ def severity(r):
     return "light"
 
 
-def load_points():
-    """Personal reference points [{"lat", "lon", "work"?}], kept out of the public repo: env ALERT_POINTS
-    (GitHub secret) or data/points.json (gitignored)."""
-    f = hunt.DATA / "points.json"
-    raw = os.environ.get("ALERT_POINTS", "").strip() or (f.read_text(encoding="utf-8") if f.exists() else "")
-    try:
-        return json.loads(raw) if raw else []
-    except ValueError:
-        return []
-
-
-POINTS = load_points()
-
-
-def km_to(r, p):
-    la1, lo1, la2, lo2 = map(math.radians, (r["lat"], r["lon"], p["lat"], p["lon"]))
-    h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
-    return 12742 * math.asin(math.sqrt(h))
+POINTS = prices.POINTS  # personal points (ALERT_POINTS secret / data/points.json): distances and trip cost
 
 
 def fmt_km(k):
@@ -226,10 +208,10 @@ def where(r):
     """'Amsterdam 3,2 km' or 'Amsterdam 💼 2,1 km': distance to the nearest point only (💼 when that is work);
     falls back to Marktplaats' distance to the search center when the listing has no coordinates."""
     city = r.get("city") or "?"
-    if r.get("lat") is None or r.get("lon") is None or not POINTS:
-        return f"{city} {r.get('km') or 0} km"
-    k, p = min((km_to(r, p), i) for i, p in enumerate(POINTS))
-    return f"{city} {'💼 ' if POINTS[p].get('work') else ''}{fmt_km(k)} km"
+    k, p = prices.nearest(r)
+    if p is None:
+        return f"{city} {k} km"
+    return f"{city} {'💼 ' if p.get('work') else ''}{fmt_km(k)} km"
 
 
 def ai_spec(r, kind):
@@ -251,12 +233,12 @@ def ai_spec(r, kind):
 
 
 def new_part(r, kind):
-    """' · −94% (~€400)': discount vs the new/market price (models.json, the AI, or the prices.py estimate)."""
-    new = r.get("new_price") or prices.new_of(r, kind)
-    if not new or not r.get("price"):
+    """' · −40% (~€160)': price vs the fair second-hand value (prices.fair: new-today equivalent × age × condition)."""
+    f, p = prices.fair(r, kind, severity(r)), prices.eff_price(r)
+    if not f or p is None:
         return ""
-    d = round((1 - r["price"] / new) * 100)
-    return f" · −{d}% (~€{new:.0f})" if d > 0 else f" · nuevo ~€{new:.0f}"
+    d = round((1 - p / f) * 100)
+    return f" · −{d}% (~€{f:.0f})" if d > 0 else f" · +{-d}% (~€{f:.0f})"
 
 
 def describe(rule, r, tag=""):
@@ -280,9 +262,10 @@ def describe_tv(rule, r, tag=""):
 
 def finish(name, body, r, tag, kind):
     """Title 'P98 (€80) name [· 🔴 HEAVY]' + damage line first, then the rule/spec lines, then the AI lines."""
-    price = f"€{r['price']:.0f}" if r.get("price") else "sin precio"
-    title = f"{prices.tag(PRICE_REF, r, kind) or 'P?'} ({price}) {name}"
     sev = severity(r)
+    price = f"puja €{r['price']:.0f}" if r.get("ask") else f"€{r['price']:.0f}" if r.get("price") else \
+        "gratis" if r.get("ptype") == "FREE" else "sin precio"
+    title = f"{prices.tag(PRICE_REF, r, kind, sev) or 'P?'} ({price}) {name}"
     if sev:
         quote = defect_note(r, LIGHT_RX if sev == "light" else None) or (r.get("ai") or {}).get("defects") or ""
         title += " · 🔴 HEAVY" if sev == "heavy" else " · 🟠 LIGHT"
@@ -299,7 +282,65 @@ def finish(name, body, r, tag, kind):
 
 
 def bids(r):
-    return f" · {r['n_bids']} pujas (máx €{r['top_bid']:.0f})" if r.get("n_bids") and r.get("top_bid") else ""
+    s = f" · pide €{r['ask']:.0f}, puja mínima €{r['price']:.0f}" if r.get("ask") else ""
+    return s + (f" · {r['n_bids']} pujas (máx €{r['top_bid']:.0f})" if r.get("n_bids") and r.get("top_bid") else "")
+
+
+def heavy_gate(cfg, r, kind):
+    """Heavily damaged listings only notify when they are still an exceptional deal at 10 % of the fair value."""
+    if severity(r) != "heavy":
+        return True
+    pc = prices.percentile(PRICE_REF, r, kind, "heavy")
+    return pc is None or pc >= cfg.get("heavy_min_percentile", 70)
+
+
+def gate(cfg, s, hits, kind):
+    out = []
+    for ru, r, tag in hits:
+        if heavy_gate(cfg, r, kind):
+            out.append((ru, r, tag))
+        else:
+            s["alerted"][r["id"]] = {"at": now(), "skipped": "heavy damage, below heavy_min_percentile", "rule": ru["name"]}
+            log(f"SKIP heavy P<{cfg.get('heavy_min_percentile', 70)} [{ru['name']}] {r['id']} {r.get('title')!r}")
+            print(f"  SKIP heavy (P too low) [{ru['name']}] {r.get('title')!r}")
+    return out
+
+
+LOWBALL_MAX = 1.5  # look at "bieden vanaf" listings asking up to 1.5 × a rule's price limit
+
+
+def lowball(cfg, s, pool, hit_ids, tv_kind, limit=3):
+    """Listings asking more than the rule allows but taking bids from a minimum that fits it ("Vraagprijs €125,
+    bieden vanaf €100" with a €110 limit): worth a lowball offer. The minimum bid is only on the listing page, so at
+    most `limit` new candidates per run are opened (gently, a few seconds apart); each is checked once."""
+    rule_of = (lambda r: tv_first_rule(cfg, r)) if tv_kind else (lambda r: first_rule(cfg, r))
+    done = s.setdefault("lowball_checked", {})
+    cand = [r for r in pool if r.get("ptype") == "MIN_BID" and r.get("price") and r["id"] not in s["alerted"]
+            and r["id"] not in done and r["id"] not in hit_ids and not rule_of(r)
+            and rule_of(dict(r, price=r["price"] / LOWBALL_MAX))]
+    out = []
+    for i, r in enumerate(cand[:limit]):
+        time.sleep(random.uniform(3, 5))
+        done[r["id"]] = now()
+        try:
+            d = db.fetch_details(r["url"])
+        except Exception as e:  # noqa: BLE001
+            if "404" in str(e) or "410" in str(e):
+                continue
+            print(f"  lowball check stopped: {str(e)[:80]}")  # 403/429/timeouts: no more page loads this run
+            break
+        mb = d.get("min_bid")
+        if not mb or mb >= r["price"]:
+            continue
+        r2 = dict(r, desc=d["desc"] or r.get("desc"), n_bids=d["n_bids"], top_bid=d["top_bid"], views=d["views"],
+                  imgs=r.get("imgs") or d.get("imgs"), ask=r["price"], price=mb)
+        r2 = tv.parse(r2) if tv_kind else db.enrich(r2)
+        if (ru := rule_of(r2)) and not (r2.get("top_bid") and r2["top_bid"] > r["price"]):
+            out.append((ru, r2))
+            print(f"  LOWBALL [{ru['name']}] pide €{r['price']:.0f}, puja mín €{mb:.0f}: {r['title'][:60]}")
+    for k in [k for k, v in done.items() if v < (dt.datetime.now() - dt.timedelta(days=30)).strftime("%Y-%m-%d")]:
+        done.pop(k)
+    return out
 
 
 def verify_hits(cfg, s, hits, tv_kind):
@@ -521,8 +562,9 @@ def cmd_run(args):
         return print(f"error: {e!r}; paused {h} h")
     s["pause_until"], s["backoff_h"] = None, 1
     global PRICE_REF
-    s.pop("price_hist", None)  # old per-group format
-    hist = s.setdefault("value_hist", {})
+    s.pop("price_hist", None)  # old formats ([price, new] pairs)
+    s.pop("value_hist", None)
+    hist = s.setdefault("value_ref", {})
     for r in rows:  # every listing seen grows the reference for the percentile
         prices.add(hist, db.enrich(dict({k: None for k in db.COLS}, **r)), "monitor")
     for r in tvs:
@@ -567,7 +609,8 @@ def cmd_run(args):
             keep_u.append((ru, r))
         else:
             checked[r["id"]] = {"at": now(), "ok": False, "ai": False}
-    hits = ai_pass(cfg, s, hits, keep_u, tv_kind=False)
+    hits += lowball(cfg, s, pool, hit_ids | {x["id"] for _, x in keep_u}, tv_kind=False)
+    hits = gate(cfg, s, ai_pass(cfg, s, hits, keep_u, tv_kind=False), "monitor")
     shown = 0
     for ru, r, tag in hits:
         title, body = describe(ru, r, tag)
@@ -590,7 +633,8 @@ def cmd_run(args):
                  and r["id"] not in hit_ids and not tv_first_rule(cfg, r) and (ru := maybe_rule(cfg, r, True))]
     n_ai = ai_budget(cfg, s) - len(tv_hits)
     tv_unsure = verify_hits(cfg, s, tv_unsure[:n_ai], tv_kind=True) if n_ai > 0 else []
-    tv_hits = ai_pass(cfg, s, tv_hits, tv_unsure, tv_kind=True)
+    tv_hits += lowball(cfg, s, tvs, hit_ids | {x["id"] for _, x in tv_unsure}, tv_kind=True)
+    tv_hits = gate(cfg, s, ai_pass(cfg, s, tv_hits, tv_unsure, tv_kind=True), "tv")
     for ru, r, tag in tv_hits:
         title, body = describe_tv(ru, r, tag)
         if shown < cfg.get("max_toasts", 4):

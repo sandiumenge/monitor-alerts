@@ -252,7 +252,9 @@ def fetch_details(url):
     i = h.index("window.__CONFIG__ = ") + 20
     e = h.index("</script>", i)
     L = json.loads(h[i:e].strip().rstrip(";"))["listing"]
-    bids = (L.get("bidsInfo") or {}).get("bids") or []
+    bi = L.get("bidsInfo") or {}
+    bids = bi.get("bids") or []
+    min_bid = (bi.get("currentMinimumBid") or 0) / 100 if bi.get("isBiddingEnabled") else 0
     st = L.get("stats") or {}
     raw = L.get("description") or ""
     if not raw:  # since Nov 2026 the description is only in the rendered HTML, not in __CONFIG__
@@ -261,7 +263,7 @@ def fetch_details(url):
     desc = re.sub(r"<[^>]+>", " ", html.unescape(raw))
     desc = re.sub(r"^\s*Beschrijving\s*", "", re.sub(r"\s+", " ", desc)).strip()
     return {"desc": desc, "n_bids": len(bids), "top_bid": max((b.get("value", 0) for b in bids), default=0) / 100 or None,
-            "views": st.get("viewCount"), "favs": st.get("favoritedCount"), "title": L.get("title"),
+            "views": st.get("viewCount"), "favs": st.get("favoritedCount"), "title": L.get("title"), "min_bid": min_bid or None,
             "price": ((L.get("priceInfo") or {}).get("priceCents") or 0) / 100 or None,
             "imgs": ["https:" + u.replace("$_#", "$_83") if u.startswith("//") else u.replace("$_#", "$_83")
                      for u in ((L.get("gallery") or {}).get("imageUrls") or [])[:3]]}
