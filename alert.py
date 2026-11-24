@@ -249,20 +249,28 @@ def fmt_km(k):
 
 def where(r):
     """'🟠 Zaandam · 9.6 km' or '🟢 Amsterdam · 1.4 km from work 💼': distance to the nearest personal point only
-    (🟢 < 2 km, 🟠 < 5 km, 🔴 further);
+    (🟢 < 3 km, 🟠 < 6 km, 🔴 further; shorter around Utrecht: dist_dot);
     Marktplaats' distance to the search center when the listing has no coordinates."""
     city = r.get("city") or "?"
     k, p = prices.nearest(r)
     if p is None:
-        return f"{dist_dot(k)} {city} · {k} km"
-    return f"{dist_dot(k)} {city} · {fmt_km(k)} km{' from work 💼' if p.get('work') else ''}"
+        return f"{dist_dot(k, r)} {city} · {k} km"
+    return f"{dist_dot(k, r)} {city} · {fmt_km(k)} km{' from work 💼' if p.get('work') else ''}"
 
 
 GREEN, ORANGE, RED = "🟢", "🟠", "🔴"
+PRIMARY = json.loads(RULES_P.read_text(encoding="utf-8")).get("primary_center", "Amsterdam")
 
 
-def dist_dot(km):
-    return GREEN if km < 2 else ORANGE if km < 5 else RED
+def dist_dot(km, r=None):
+    """🟢 < 3 km, 🟠 < 6 km, 🔴 further around Amsterdam; around another center the limits shrink with its search
+    radius (Utrecht 6 km / Amsterdam 15 km = ×0.4 → 🟢 < 1.2 km, 🟠 < 2.4 km)."""
+    s = 1.0
+    near = ((r or {}).get("near") or "").split(",")
+    primary = PRIMARY
+    if near[0] and primary not in near:
+        s = hunt.radius_m(near[0]) / hunt.radius_m(primary)
+    return GREEN if km < 3 * s else ORANGE if km < 6 * s else RED
 
 
 def quality_dot(f, kind, r):
