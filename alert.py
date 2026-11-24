@@ -333,6 +333,14 @@ def inch_s(f):
 
 
 LINE = 36  # characters that fit on one line of the ntfy notification on the phone
+TITLE_W = 35  # columns after the 🖥️/📺 icon the app adds; the title is bold, so fewer fit: measured on the phone,
+#               columns) still fit but the ⛔ after it (39) wrapped to a second line
+
+
+def width(s):
+    """Columns a string takes on the phone: emoji and symbols like ⚠️ ⛔ count double, the invisible emoji
+    variation selector counts zero."""
+    return sum(0 if c in "️‍" else 2 if ord(c) >= 0x1F000 or c in "⚠⛔❓✅⭐⚡" else 1 for c in s)
 
 
 def headline(f, kind, room):
@@ -341,12 +349,14 @@ def headline(f, kind, room):
     res = (f["res"] or "") + ("?" if f["res"] and f["guess"] else "")
     if kind == "tv":
         panel = "NanoCell" if f["nano"] else {"OLED": "OLED", "QLED": "QLED", "PLASMA": "Plasma"}.get(f["panel"], "")
-        bits = [(f["brand"] or "TV", 0), (inch_s(f), 0), (res, 1), (panel, 2), ("Smart" if f["smart"] else "", 3)]
+        top = panel in ("OLED", "QLED", "NanoCell") and res.startswith("4K")  # these imply 4K: keep the panel
+        bits = [(f["brand"] or "TV", 0), (inch_s(f), 0), (res, 2 if top else 1), (panel, 1 if top else 2),
+                ("Smart" if f["smart"] else "", 3)]
     else:
         bits = [(f["brand"] or "Monitor", 0), (inch_s(f), 0), ("ultrawide" if f["uw"] else res, 1),
                 ("USB‑C" if f["usbc_w"] else "", 2), ("curved" if f["curved"] else "", 3)]
     bits = [(x, k) for x, k in bits if x]
-    while len(" ".join(x for x, _ in bits)) > room and any(k for _, k in bits):
+    while width(" ".join(x for x, _ in bits)) > room and any(k for _, k in bits):
         worst = max(k for _, k in bits)
         bits = [(x, k) for x, k in bits if k != worst]
     return " ".join(x for x, _ in bits)[:room]
@@ -369,16 +379,20 @@ def spec_line(f, kind, r):
 
 
 def price_line(r, kind):
-    """'🟢 Recommended €241 · New €400 (−88%)', short enough for one phone line: the fair second-hand value, then the
-    real new price (models.json / the AI / the new-today estimate) and how far the asking price is below it."""
+    """'🟢 Worth ~€241 · New €400 (−88%)', always one phone line: the estimated second-hand value ('~': our own
+    estimate, not a real price), then the real new price (models.json / the AI / the new-today estimate) and how far
+    the asking price is below it. The discount is dropped if the line would still not fit."""
     p = r.get("price")
     new = r.get("new_price") or prices.new_of(r, kind)
     f = prices.fair(r, kind, severity(r))
-    parts = [f"Recommended €{f:.0f}"] if f else []
+    parts = [f"Worth ~€{f:.0f}"] if f else []
     if new:
         d = round((1 - p / new) * 100) if p else None
         parts.append(f"New €{new:.0f}" + (f" (−{d}%)" if d and d > 0 else ""))
-    return price_dot(prices.eff_price(r), f) + " " + " · ".join(parts) if parts else ""
+    if not parts:
+        return ""
+    out = price_dot(prices.eff_price(r), f) + " " + " · ".join(parts)
+    return out if width(out) <= LINE else out.split(" (−")[0]
 
 
 def bids(r):
@@ -398,22 +412,27 @@ def describe_tv(rule, r, tag=""):
 
 
 def finish(r, tag, kind):
-    """Title 'P93 · €150 · 📺 LG 55" 4K NanoCell Smart [· 🟠/🔴] [❓]', then one line each: bids (only if any),
-    specs, damage (only if any), price, distance, and the AI / not-sure notes."""
+    """Title 'P93 · €150 · LG 55" 4K NanoCell Smart [❓]' ('· ⚠️ LG…'/'· ⛔ LG…' when damaged), then one line
+    each: damage (only if any), bids (only if any), specs, price, distance, and the AI / not-sure notes."""
     sev = severity(r)
     f = facts(r, kind)
     p = r.get("price")
     price = f"€{p:.0f}" if p else "free" if r.get("ptype") == "FREE" else "no price"
-    emoji = "📺" if kind == "tv" else "🖥️"
-    head = f"{prices.tag(PRICE_REF, r, kind, sev) or 'P?'} · {price} · {emoji} "
-    room = LINE - len(head) - (4 if sev else 0) - (2 if tag else 0)
+    # the app already puts 🖥️/📺 before the title (ntfy tag), so only a damaged listing gets a symbol here
+    emoji = "⛔ " if sev == "heavy" else "⚠️ " if sev else ""
+    head = f"{prices.tag(PRICE_REF, r, kind, sev) or 'P?'} · {price} · {emoji}"
+    room = TITLE_W - width(head) - (3 if tag else 0)  # ' ❓'
     title = head + headline(f, kind, room)
     dmg = ""
     if sev:
         en = damage_en(r, sev) or "check the listing"
-        title += " · ⛔" if sev == "heavy" else " · ⚠️"
-        dmg = (f"⛔ Badly broken{': ' + en if en else ''} ⛔" if sev == "heavy"
-               else f"⚠️ Light damage{': ' + en if en else ''} ⚠️")
+        sym, lab = ("⛔", "Badly broken") if sev == "heavy" else ("⚠️", "Light damage")
+        room = LINE - width(f"{sym} {lab}:  {sym}")  # one phone line, so the closing symbol never wraps alone
+        while width(en) > room and ", " in en:  # drop the least important faults first
+            en = en.rsplit(", ", 1)[0]
+        if width(en) > room:
+            en = en[:room - 1].rstrip(" ,") + "…"
+        dmg = f"{sym} {lab}: {en} {sym}"
     if tag:
         title += " ❓"
     a = ai.line(r)
@@ -788,7 +807,7 @@ def cmd_run(args):
         if shown < cfg.get("max_toasts", 4):
             notify.toast(title, body, r["url"])
             shown += 1
-        notify.ntfy(cfg.get("ntfy_topic_tv"), title, body, r["url"])
+        notify.ntfy(cfg.get("ntfy_topic_tv"), title, body, r["url"], tag="tv")
         s["alerted"][r["id"]] = {"at": now(), "rule": ru["name"], "price": r.get("price"), "tv": True, "unsure": bool(tag)}
         log(f"ALERT TV{' ' + tag if tag else ''} [{ru['name']}] {r['id']} €{r.get('price')} {r['title']!r} {r.get('city')} {r['url']}")
     hits_all = hits + tv_hits
@@ -810,7 +829,7 @@ def cmd_run(args):
         if t.hour >= cfg.get("heartbeat_hour", 21) and s.get("heartbeat") != day and cfg.get("heartbeat", True):
             notify.ntfy(cfg.get("ntfy_topic"), "✅ Monitor and TV alerts running",
                         f"Today: {d['checks']} checks · monitors: {d['new']} new, {d['alerts']} alerts · "
-                        f"TVs: {d['tv_new']} new, {d['tv_alerts']} alerts · AI: {d.get('ai', 0)} lookups.", "", priority=2)
+                        f"TVs: {d['tv_new']} new, {d['tv_alerts']} alerts · AI: {d.get('ai', 0)} lookups.", "", priority=2, tag=None)
             s["heartbeat"] = day
         summary(cfg, pool, new_rows, hits, s)
         summary_tv(cfg, tvs, tv_new, tv_hits)
@@ -912,17 +931,20 @@ def cmd_toast(args):
 
 
 def cmd_ping(args):
+    """Two TEST pushes built by the real formatter (finish), so they show exactly what a real alert looks like."""
     cfg = conf()
-    ok = notify.ntfy(cfg.get("ntfy_topic"), "P97 · €75 · 🖥️ iiyama 34\" ultrawide · ⚠️",
-                     "⚠️ Light damage: dead pixels ⚠️\n"
-                     "🟠 34\" · 3440×1440 (UWQHD) · 75Hz · VA · USB‑C 65W\n"
-                     "🟢 Recommended €160 · New €330 (−77%)\n🟠 Amsterdam · 3.2 km\n"
-                     "(TEST sample, not a real listing)", "https://www.marktplaats.nl")
-    ok = notify.ntfy(cfg.get("ntfy_topic_tv"), "P96 · €20 · 📺 Samsung 65\" 4K QLED · ⛔",
-                     "⛔ Badly broken: cracked screen, lines on screen ⛔\n"
-                     "🟢 65\" · 4K · QLED · Smart · 2019\n🟢 Recommended €40 · New €845 (−98%)\n"
-                     "🟢 Amsterdam · 1.6 km\n"
-                     "(TEST sample, not a real listing)", "https://www.marktplaats.nl") and ok
+    mon = {"title": "iiyama 34 inch ultrawide", "price": 75, "ptype": "FIXED", "inch": 34, "res": "UWQHD",
+           "panel": "VA", "hz": 75, "usbc": "USB-C 65W", "ultrawide": True, "city": "Amsterdam", "km": 3.2,
+           "desc": "2 dode pixels rechtsboven, verder perfect", "damage": "dode pixels"}
+    tvr = {"title": "Samsung 65 inch QLED", "price": 20, "ptype": "FIXED", "inch": 65, "res": "4K", "panel": "QLED",
+           "smart": True, "year": 2019, "city": "Amsterdam", "km": 1.6,
+           "desc": "Scherm gebarsten na val, strepen in beeld", "damage": "roto/grieta"}
+    ok = True
+    for topic, r, kind in ((cfg.get("ntfy_topic"), mon, "monitor"), (cfg.get("ntfy_topic_tv"), tvr, "tv")):
+        t, b = finish(r, "", kind)
+        print(t, b, "", sep="\n")
+        ok = notify.ntfy(topic, t, b + "\n(TEST sample, not a real listing)", "https://www.marktplaats.nl",
+                         tag="tv" if kind == "tv" else "desktop_computer") and ok
     print("phone push sent" if ok else "phone push FAILED (is NTFY_TOPIC set?)")
 
 

@@ -56,12 +56,13 @@ def toast(title, body, url=""):
         return False
 
 
-def ntfy(topic, title, body, url="", priority=4):
-    """Phone push via ntfy.sh (free app). Only listing data is sent, never personal data."""
+def ntfy(topic, title, body, url="", priority=4, tag="desktop_computer"):
+    """Phone push via ntfy.sh (free app). Only listing data is sent, never personal data. `tag` is the icon the app
+    shows before the title (desktop_computer = 🖥️, tv = 📺, None = no icon)."""
     if not topic:
         return False
     try:
-        msg = {"topic": topic, "title": title, "message": body, "tags": ["desktop_computer"], "priority": priority}
+        msg = {"topic": topic, "title": title, "message": body, "tags": [tag] if tag else [], "priority": priority}
         if url:
             msg["click"] = url
             msg["actions"] = [{"action": "view", "label": "Abrir anuncio", "url": url}]
