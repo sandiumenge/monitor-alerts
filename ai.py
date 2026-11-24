@@ -116,7 +116,7 @@ def apply(r, a, kind):
 
 def line(r):
     """Extra push line only when the AI sees a defect the listing does not mention (specs, model and new price
-    already go in the title and spec line: alert.ai_spec / new_part; the note is kept out to stay short)."""
+    already go in the title, spec and price lines: alert.finish; the note is kept out to stay short)."""
     a = r.get("ai")
     if not a:
         return ""

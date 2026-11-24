@@ -48,7 +48,9 @@ SAMSUNG_YEAR = {"H": 2014, "J": 2015, "K": 2016, "KU": 2016, "M": 2017, "MU": 20
                 "AU": 2021, "BU": 2022, "CU": 2023, "DU": 2024, "Q6F": 2018, "Q7F": 2017}
 LG_YEAR = {"UH": 2016, "UJ": 2017, "UK": 2018, "UM": 2019, "UN": 2020, "NANO": None, "UP": 2021, "UQ": 2022, "UR": 2023,
            "UT": 2024, "B6": 2016, "C6": 2016, "B7": 2017, "C7": 2017, "B8": 2018, "C8": 2018, "B9": 2019, "C9": 2019,
-           "BX": 2020, "CX": 2020, "B1": 2021, "C1": 2021, "A1": 2021, "B2": 2022, "C2": 2022, "B3": 2023, "C3": 2023}
+           "BX": 2020, "CX": 2020, "B1": 2021, "C1": 2021, "A1": 2021, "B2": 2022, "C2": 2022, "B3": 2023, "C3": 2023,
+           "E6": 2016, "G6": 2016, "E7": 2017, "G7": 2017, "W7": 2017, "E8": 2018, "W8": 2018, "E9": 2019, "W9": 2019,
+           "GX": 2020, "WX": 2020, "G1": 2021, "G2": 2022, "G3": 2023}
 
 
 def has_damage(text):
@@ -78,7 +80,7 @@ def year_of(text):
     m = re.search(r"\b(?:UE|GU)\d{2}([A-Z]{1,2})\d{4}", t)
     if m and m.group(1) in SAMSUNG_YEAR:
         return SAMSUNG_YEAR[m.group(1)]
-    m = re.search(r"\b(?:OLED)?\d{2}(UH|UJ|UK|UM|UN|UP|UQ|UR|UT|B6|C6|B7|C7|B8|C8|B9|C9|BX|CX|B1|C1|A1|B2|C2|B3|C3)", t)
+    m = re.search(r"\b(?:OLED)?\d{2}(UH|UJ|UK|UM|UN|UP|UQ|UR|UT|B6|C6|B7|C7|B8|C8|B9|C9|BX|CX|B1|C1|A1|B2|C2|B3|C3|E6|G6|E7|G7|W7|E8|W8|E9|W9|GX|WX|G1|G2|G3)", t)
     if m:
         return LG_YEAR.get(m.group(1))
     m = re.search(r"\b\d{2}(?:PUS|OLED|PML|PUD)\d{3}(\d)", t)  # Philips: last digit 2=2017 ... 8=2023

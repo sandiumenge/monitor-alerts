@@ -205,79 +205,128 @@ def fmt_km(k):
 
 
 def where(r):
-    """'Amsterdam 3,2 km' or 'Amsterdam 💼 2,1 km': distance to the nearest point only (💼 when that is work);
-    falls back to Marktplaats' distance to the search center when the listing has no coordinates."""
+    """'📍 Zaandam, a 9,6 km' or '📍 Amsterdam, a 2,1 km del trabajo': distance to the nearest personal point only;
+    Marktplaats' distance to the search center when the listing has no coordinates."""
     city = r.get("city") or "?"
     k, p = prices.nearest(r)
     if p is None:
-        return f"{city} {k} km"
-    return f"{city} {'💼 ' if p.get('work') else ''}{fmt_km(k)} km"
+        return f"📍 {city}, a {k} km"
+    return f"📍 {city}, a {fmt_km(k)} km{' del trabajo 💼' if p.get('work') else ''}"
 
 
-def ai_spec(r, kind):
-    """The DeepSeek specs as the spec line ('55" 4K LED Smart 2018', '4K?' when its confidence is low), with the
-    listing's own data only filling gaps. '' when the AI did not run (budget/failure): the regex line is used."""
-    a = r.get("ai")
-    if not a:
-        return ""
+MON_BRANDS = re.compile(r"\b(dell|alienware|lg|samsung|asus|acer|aoc|benq|hp|iiyama|philips|msi|lenovo|viewsonic|"
+                        r"gigabyte|eizo|xiaomi|huawei|koorui|fujitsu|nec|medion|sony|apple|corsair|cooler master|"
+                        r"lc-?power|hannspree|sharp|dough|gamemax|pixio|razer|mobiuz|titan army)\b", re.I)
+BRAND_NAME = {"lg": "LG", "aoc": "AOC", "hp": "HP", "msi": "MSI", "tcl": "TCL", "jvc": "JVC", "benq": "BenQ",
+              "iiyama": "iiyama", "nec": "NEC", "lc-power": "LC-Power", "lcpower": "LC-Power", "bang": "B&O"}
+RES_PX = {"UWQHD": "3440×1440", "UWFHD": "2560×1080", "QHD": "2560×1440", "4K": "3840×2160", "5K2K": "5120×2160",
+          "FHD": "1920×1080", "DQHD": "5120×1440", "DFHD": "3840×1080", "HD": "1366×768"}
+CURVED = re.compile(r"curved|gebogen|\bcurve\b|\bcurvo\b|\bC\d{2}[A-Z]", re.I)
+
+
+def facts(r, kind):
+    """Specs for the push: the AI's answer first (it saw the photos and looked the model up), the listing's own
+    parse filling the gaps. guess = resolution not confirmed (inferred from the year / low AI confidence)."""
+    a = r.get("ai") or {}
     def g(f):
         return a.get(f) if a.get(f) not in (None, "") else r.get(f)
-    inch, hz = g("inch"), g("hz")
-    usb = f"USB‑C {a['usbc_w']}W" if a.get("usbc_w") else \
-        f"USB‑C {r['usbc']}" if re.search(r"\d+W", r.get("usbc") or "") else ""
-    res = (g("res") or "") + ("?" if g("res") and a.get("confidence") == "baja" else "")
-    return " ".join(str(x) for x in [
-        f"{inch:g}\"" if isinstance(inch, (int, float)) else "", res, g("panel") or "",
-        f"{hz}Hz" if hz and (kind != "tv" or hz > 60) else "", "Smart" if kind == "tv" and g("smart") else "",
-        usb if kind != "tv" else "", g("year") or ""] if x)
+    text = f"{r.get('title') or ''} {a.get('model') or ''} {r.get('model') or ''}"
+    b = (re.search(rf"\b({tv.BRANDS})\b", text, re.I) if kind == "tv" else MON_BRANDS.search(text))
+    brand = (b.group(1) if b else r.get("brand") or "").lower()
+    usbc_w = a.get("usbc_w") or (int(m.group(1)) if (m := re.search(r"(\d+)W", r.get("usbc") or "")) else None)
+    return {"brand": BRAND_NAME.get(brand.replace(" ", ""), brand.title()) if brand else "",
+            "inch": g("inch"), "res": g("res"), "panel": g("panel"), "hz": g("hz"), "smart": g("smart"),
+            "year": g("year"), "usbc_w": usbc_w,
+            "guess": bool(r.get("res_guess")) or a.get("confidence") == "baja",
+            "nano": bool(prices.NANO.search(text)), "curved": bool(CURVED.search(f"{text} {r.get('desc') or ''}")),
+            "uw": bool(r.get("ultrawide")) or (g("res") or "").startswith(("UW", "5K2K", "D"))}
 
 
-def new_part(r, kind):
-    """' · −88% (nuevo ~€800) · vale ~€92': asking price vs the real new price (models.json, the AI, or the
-    prices.py new-today estimate), then the fair second-hand value (prices.fair: new-today × age × condition)."""
-    p = r.get("ask") or r.get("price")
+def inch_s(f):
+    return f"{f['inch']:g}\"" if isinstance(f["inch"], (int, float)) else ""
+
+
+LINE = 36  # characters that fit on one line of the ntfy notification on the phone
+
+
+def headline(f, kind, room):
+    """Short title part, brand + the facts that matter most, dropping the least important ones to fit `room`
+    characters ('LG 55" 4K NanoCell Smart', 'MSI 34" ultrawide USB‑C')."""
+    res = (f["res"] or "") + ("?" if f["res"] and f["guess"] else "")
+    if kind == "tv":
+        panel = "NanoCell" if f["nano"] else {"OLED": "OLED", "QLED": "QLED", "PLASMA": "Plasma"}.get(f["panel"], "")
+        bits = [(f["brand"] or "Tele", 0), (inch_s(f), 0), (res, 1), (panel, 2), ("Smart" if f["smart"] else "", 3)]
+    else:
+        bits = [(f["brand"] or "Monitor", 0), (inch_s(f), 0), ("ultrawide" if f["uw"] else res, 1),
+                ("USB‑C" if f["usbc_w"] else "", 2), ("curvo" if f["curved"] else "", 3)]
+    bits = [(x, k) for x, k in bits if x]
+    while len(" ".join(x for x, _ in bits)) > room and any(k for _, k in bits):
+        worst = max(k for _, k in bits)
+        bits = [(x, k) for x, k in bits if k != worst]
+    return " ".join(x for x, _ in bits)[:room]
+
+
+def spec_line(f, kind):
+    """'📏 34" · 3440×1440 (UWQHD) · 100Hz · VA · USB‑C 65W · curvo' / '📏 55" · 4K · OLED · Smart · 2018'
+    (may wrap to a second line on the phone)."""
+    q = "?" if f["guess"] else ""
+    if kind == "tv":
+        bits = [inch_s(f), (f["res"] or "resolución ?") + (q if f["res"] else ""),
+                "NanoCell" if f["nano"] else f["panel"] or "", "Smart" if f["smart"] else "",
+                f"{f['hz']}Hz" if f["hz"] and f["hz"] > 60 else "", str(f["year"] or "")]
+    else:
+        res = f["res"] or ""
+        bits = [inch_s(f), f"{RES_PX[res]} ({res}){q}" if res in RES_PX else res + q if res else "resolución ?",
+                f"{f['hz']}Hz" if f["hz"] else "", f["panel"] or "",
+                f"USB‑C {f['usbc_w']}W" if f["usbc_w"] else "", "curvo" if f["curved"] else "", str(f["year"] or "")]
+    return "📏 " + " · ".join(x for x in bits if x)
+
+
+def price_line(r, kind):
+    """'💶 Vale ~€241 · nuevo ~€400 (−88%)', short enough for one phone line: the fair second-hand value, then the
+    real new price (models.json / the AI / the new-today estimate) and how far the asking price is below it."""
+    p = r.get("price")
     new = r.get("new_price") or prices.new_of(r, kind)
     f = prices.fair(r, kind, severity(r))
-    out = ""
-    if new and p:
-        d = round((1 - p / new) * 100)
-        out += f" · −{d}% (nuevo ~€{new:.0f})" if d > 0 else f" · nuevo ~€{new:.0f}"
-    elif new:
-        out += f" · nuevo ~€{new:.0f}"
-    return out + (f" · vale ~€{f:.0f}" if f else "")
+    parts = [f"Vale ~€{f:.0f}"] if f else []
+    if new:
+        d = round((1 - p / new) * 100) if p else None
+        parts.append(f"nuevo ~€{new:.0f}" + (f" (−{d}%)" if d and d > 0 else ""))
+    return "💶 " + " · ".join(parts) if parts else ""
+
+
+def bids(r):
+    """Only when somebody already bid (rare: listings are checked within 10 minutes of being posted)."""
+    if not (r.get("n_bids") and r.get("top_bid")):
+        return ""
+    n = r["n_bids"]
+    return f"🔨 Ya hay {n} puja{'s' if n > 1 else ''}: la más alta €{r['top_bid']:.0f}"
 
 
 def describe(rule, r, tag=""):
-    spec = " ".join(x for x in [f"{r['inch']:g}\"" if r.get("inch") else "", r.get("res") or "",
-                                f"{r['hz']}Hz" if r.get("hz") else "",
-                                f"USB‑C {r['usbc']}" if re.search(r"\d+W", r.get("usbc") or "") else ""] if x)
-    name = r.get("model") or (r.get("title") or "")[:55]
-    spec = ai_spec(r, "monitor") or spec
-    body = f"🖥️ {rule['name']}\n{spec}{new_part(r, 'monitor')} · {where(r)}{bids(r)}"
-    return finish(f"🖥️ {name}", body, r, tag, "monitor")
+    return finish(r, tag, "monitor")
 
 
 def describe_tv(rule, r, tag=""):
-    spec = " ".join(x for x in [f"{r['inch']}\"", (r.get("res") or "") + ("?" if r.get("res_guess") else ""), r.get("panel") or "",
-                                "Smart" if r.get("smart") else "", str(r["year"]) if r.get("year") else ""] if x)
-    name = f"📺 {((r.get('ai') or {}).get('model') or r.get('title') or '')[:55]}"
-    spec = ai_spec(r, "tv") or spec
-    body = f"📺 {rule['name']}\n{spec}{new_part(r, 'tv')} · {where(r)}{bids(r)}"
-    return finish(name, body, r, tag, "tv")
+    return finish(r, tag, "tv")
 
 
-def finish(name, body, r, tag, kind):
-    """Title 'P98 (€80) name [· 🔴 HEAVY]' + damage line first, then the rule/spec lines, then the AI lines."""
+def finish(r, tag, kind):
+    """Title 'P93 · €150 · 📺 LG 55" 4K NanoCell Smart [· 🟠/🔴] [❓]', then one line each: bids (only if any),
+    specs, damage (only if any), price, distance, and the AI / not-sure notes."""
     sev = severity(r)
-    p = r.get("ask") or r.get("price")  # the listing's own price; a lowball's realistic price goes in the 🔨 line
-    price = f"€{p:.0f}" if p else \
-        "gratis" if r.get("ptype") == "FREE" else "sin precio"
-    title = f"{prices.tag(PRICE_REF, r, kind, sev) or 'P?'} ({price}) {name}"
+    f = facts(r, kind)
+    p = r.get("price")
+    price = f"€{p:.0f}" if p else "gratis" if r.get("ptype") == "FREE" else "sin precio"
+    emoji = "📺" if kind == "tv" else "🖥️"
+    head = f"{prices.tag(PRICE_REF, r, kind, sev) or 'P?'} · {price} · {emoji} "
+    room = LINE - len(head) - (4 if sev else 0) - (2 if tag else 0)
+    title = head + headline(f, kind, room)
+    dmg = ""
     if sev:
         quote = defect_note(r, LIGHT_RX if sev == "light" else None) or (r.get("ai") or {}).get("defects") or ""
-        title += " · 🔴 HEAVY" if sev == "heavy" else " · 🟠 LIGHT"
-        head = "🔴 HEAVILY DAMAGED" if sev == "heavy" else "🟠 LIGHTLY DAMAGED"
-        body = f"{head}{': «' + quote[:110] + '»' if quote else ''}\n{body}"
+        title += " · 🔴" if sev == "heavy" else " · 🟠"
+        dmg = ("🔴 Daño grave" if sev == "heavy" else "🟠 Daño leve") + (f": «{quote[:60]}{'…' if len(quote) > 60 else ''}»" if quote else "")
     if tag:
         title += " ❓"
     a = ai.line(r)
@@ -285,17 +334,8 @@ def finish(name, body, r, tag, kind):
         a = "❓ Falta un dato clave (resolución/tamaño) y no se pudo comprobar"
     elif tag:
         a = (a + "\n" if a else "") + "❓ La IA no lo confirma del todo: míralo"
-    return title, f"{body}\n{a}" if a else body
-
-
-def bids(r):
-    """Own line under the spec line: '🔨 puja mínima €30 → ~€45 realista · 2 pujas (máx €40)', or ''."""
-    parts = []
-    if r.get("ask"):
-        parts.append(f"puja mínima €{r['min_bid']:.0f} → ~€{r['price']:.0f} realista")
-    if r.get("n_bids") and r.get("top_bid"):
-        parts.append(f"{r['n_bids']} pujas (máx €{r['top_bid']:.0f})")
-    return "\n🔨 " + " · ".join(parts) if parts else ""
+    lines = [bids(r), spec_line(f, kind), dmg, price_line(r, kind), where(r), a]
+    return title, "\n".join(x for x in lines if x)
 
 
 def heavy_gate(cfg, r, kind):
@@ -628,7 +668,8 @@ def cmd_run(args):
             keep_u.append((ru, r))
         else:
             checked[r["id"]] = {"at": now(), "ok": False, "ai": False}
-    hits += lowball(cfg, s, pool, hit_ids | {x["id"] for _, x in keep_u}, tv_kind=False)
+    if cfg.get("lowball"):
+        hits += lowball(cfg, s, pool, hit_ids | {x["id"] for _, x in keep_u}, tv_kind=False)
     hits = gate(cfg, s, ai_pass(cfg, s, hits, keep_u, tv_kind=False), "monitor")
     shown = 0
     for ru, r, tag in hits:
@@ -652,7 +693,8 @@ def cmd_run(args):
                  and r["id"] not in hit_ids and not tv_first_rule(cfg, r) and (ru := maybe_rule(cfg, r, True))]
     n_ai = ai_budget(cfg, s) - len(tv_hits)
     tv_unsure = verify_hits(cfg, s, tv_unsure[:n_ai], tv_kind=True) if n_ai > 0 else []
-    tv_hits += lowball(cfg, s, tvs, hit_ids | {x["id"] for _, x in tv_unsure}, tv_kind=True)
+    if cfg.get("lowball"):
+        tv_hits += lowball(cfg, s, tvs, hit_ids | {x["id"] for _, x in tv_unsure}, tv_kind=True)
     tv_hits = gate(cfg, s, ai_pass(cfg, s, tv_hits, tv_unsure, tv_kind=True), "tv")
     for ru, r, tag in tv_hits:
         title, body = describe_tv(ru, r, tag)
