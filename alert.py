@@ -412,15 +412,14 @@ def describe_tv(rule, r, tag=""):
 
 
 def finish(r, tag, kind):
-    """Title 'P93 · €150 · LG 55" 4K NanoCell Smart [❓]' ('· ⚠️ LG…'/'· ⛔ LG…' when damaged), then one line
-    each: damage (only if any), bids (only if any), specs, price, distance, and the AI / not-sure notes."""
+    """Title 'P93 · €150 · LG 55" 4K NanoCell Smart [❓]' (the app adds the 🖥️/📺 icon; damage ⚠️/⛔ goes only
+    on the line right under it), then one line each: damage (only if any), bids (only if any), specs, price,
+    distance, and the AI / not-sure notes."""
     sev = severity(r)
     f = facts(r, kind)
     p = r.get("price")
     price = f"€{p:.0f}" if p else "free" if r.get("ptype") == "FREE" else "no price"
-    # the app already puts 🖥️/📺 before the title (ntfy tag), so only a damaged listing gets a symbol here
-    emoji = "⛔ " if sev == "heavy" else "⚠️ " if sev else ""
-    head = f"{prices.tag(PRICE_REF, r, kind, sev) or 'P?'} · {price} · {emoji}"
+    head = f"{prices.tag(PRICE_REF, r, kind, sev) or 'P?'} · {price} · "
     room = TITLE_W - width(head) - (3 if tag else 0)  # ' ❓'
     title = head + headline(f, kind, room)
     dmg = ""
