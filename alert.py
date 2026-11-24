@@ -263,7 +263,7 @@ def describe_tv(rule, r, tag=""):
 def finish(name, body, r, tag, kind):
     """Title 'P98 (€80) name [· 🔴 HEAVY]' + damage line first, then the rule/spec lines, then the AI lines."""
     sev = severity(r)
-    price = f"puja €{r['price']:.0f}" if r.get("ask") else f"€{r['price']:.0f}" if r.get("price") else \
+    price = f"~€{r['price']:.0f} puja" if r.get("ask") else f"€{r['price']:.0f}" if r.get("price") else \
         "gratis" if r.get("ptype") == "FREE" else "sin precio"
     title = f"{prices.tag(PRICE_REF, r, kind, sev) or 'P?'} ({price}) {name}"
     if sev:
@@ -282,7 +282,7 @@ def finish(name, body, r, tag, kind):
 
 
 def bids(r):
-    s = f" · pide €{r['ask']:.0f}, puja mínima €{r['price']:.0f}" if r.get("ask") else ""
+    s = f" · pide €{r['ask']:.0f}, puja mínima €{r['min_bid']:.0f}" if r.get("ask") else ""
     return s + (f" · {r['n_bids']} pujas (máx €{r['top_bid']:.0f})" if r.get("n_bids") and r.get("top_bid") else "")
 
 
@@ -306,13 +306,15 @@ def gate(cfg, s, hits, kind):
     return out
 
 
-LOWBALL_MAX = 1.5  # look at "bieden vanaf" listings asking up to 1.5 × a rule's price limit
+LOWBALL_MAX = 2.0  # look at "bieden vanaf" listings asking up to 2 × a rule's price limit
+LOWBALL_EST = 1.5  # realistic price = min(1.5 × highest bid, or 1.5 × minimum bid if none, asking price)
 
 
 def lowball(cfg, s, pool, hit_ids, tv_kind, limit=3):
-    """Listings asking more than the rule allows but taking bids from a minimum that fits it ("Vraagprijs €125,
-    bieden vanaf €100" with a €110 limit): worth a lowball offer. The minimum bid is only on the listing page, so at
-    most `limit` new candidates per run are opened (gently, a few seconds apart); each is checked once."""
+    """Listings asking more than the rule allows but taking bids, whose realistic price still fits it:
+    min(1.5 × highest bid (or minimum bid when nobody bid), asking price) strictly under the limit. E.g. €110 limit:
+    "Vraagprijs €175, bieden vanaf €60" → ~€90 notifies; "bieden vanaf €100" → ~€150 does not. The minimum bid is only
+    on the listing page, so at most `limit` new candidates per run are opened (a few seconds apart), each once."""
     rule_of = (lambda r: tv_first_rule(cfg, r)) if tv_kind else (lambda r: first_rule(cfg, r))
     done = s.setdefault("lowball_checked", {})
     cand = [r for r in pool if r.get("ptype") == "MIN_BID" and r.get("price") and r["id"] not in s["alerted"]
@@ -332,12 +334,17 @@ def lowball(cfg, s, pool, hit_ids, tv_kind, limit=3):
         mb = d.get("min_bid")
         if not mb or mb >= r["price"]:
             continue
+        # what it will realistically sell for: 1.5 × the highest bid (or the minimum bid if nobody bid), at most the ask
+        est = min(LOWBALL_EST * (d.get("top_bid") or mb), r["price"])
         r2 = dict(r, desc=d["desc"] or r.get("desc"), n_bids=d["n_bids"], top_bid=d["top_bid"], views=d["views"],
-                  imgs=r.get("imgs") or d.get("imgs"), ask=r["price"], price=mb)
+                  imgs=r.get("imgs") or d.get("imgs"), ask=r["price"], min_bid=mb, price=est)
         r2 = tv.parse(r2) if tv_kind else db.enrich(r2)
-        if (ru := rule_of(r2)) and not (r2.get("top_bid") and r2["top_bid"] > r["price"]):
+        ru = rule_of(r2)
+        if ru and est < ru.get("max_price", float("inf")) * price_factor(cfg, r2):  # strictly under the limit
             out.append((ru, r2))
-            print(f"  LOWBALL [{ru['name']}] pide €{r['price']:.0f}, puja mín €{mb:.0f}: {r['title'][:60]}")
+            print(f"  LOWBALL [{ru['name']}] pide €{r['price']:.0f}, puja mín €{mb:.0f}, estimado €{est:.0f}: {r['title'][:60]}")
+        else:
+            print(f"  lowball no: pide €{r['price']:.0f}, puja mín €{mb:.0f}, estimado €{est:.0f} · {r['title'][:50]}")
     for k in [k for k, v in done.items() if v < (dt.datetime.now() - dt.timedelta(days=30)).strftime("%Y-%m-%d")]:
         done.pop(k)
     return out
