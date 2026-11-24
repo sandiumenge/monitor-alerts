@@ -2,7 +2,7 @@
 
 Used by alert.py only on listings that are about to be notified, or that might fit a rule but miss a key fact
 (a TV with no stated resolution, a monitor with no size). It identifies the exact model, checks the specs and
-looks up the new price, so the push can show "nuevo ~€X (−Y %)".
+looks up the new price, so the push can show "New €X (−Y%)".
 
 Key: DEEPSEEK_API_KEY env var (GitHub secret) or data/deepseek_key.txt locally (both kept out of git).
 Only public listing data (title, description, price, photo URLs) is sent.
@@ -34,9 +34,9 @@ SYSTEM = (
     '"year": int|null, "usbc_w": int|null, "new_price_eur": number|null, "confidence": "alta"|"media"|"baja", '
     '"defects": str|null, "damage": "none"|"light"|"heavy", "note": str}\n'
     "usbc_w = USB-C power delivery in watts (monitors only). defects = any damage or fault the seller mentions or "
-    "the photos show, in Spanish, short; null when there is none. damage = light for small faults a buyer can live "
+    "the photos show, in English, short; null when there is none. damage = light for small faults a buyer can live "
     "with (a few dead or white pixels, slight backlight bleed, a dent in the casing, missing remote/stand), heavy for "
-    "scratches on the screen, cracks, lines, dark or discoloured areas, burn-in, flickering or not working. note = one short sentence in Spanish for the buyer (max 90 characters): "
+    "scratches on the screen, cracks, lines, dark or discoloured areas, burn-in, flickering or not working. note = one short sentence in English for the buyer (max 90 characters): "
     "what it is and whether the price is good."
 )
 
@@ -122,8 +122,8 @@ def line(r):
         return ""
     s = ""
     if a.get("defects") and a.get("damage") not in ("light", "heavy") and not r.get("damage") and \
-            not re.match(r"(ninguno|ninguna|no |sin |none|nada)", a["defects"], re.I):
-        s += f"\n🤖 La IA ve: {a['defects'][:100]}"  # light/heavy verdicts are shown in the damage line instead
+            not re.match(r"(ninguno|ninguna|no |sin |none|nada|nothing|n/a)", a["defects"], re.I):
+        s += f"\n🤖 AI sees: {a['defects'][:100]}"  # light/heavy verdicts are shown in the damage line instead
     return s.strip()
 
 

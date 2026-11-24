@@ -201,17 +201,17 @@ POINTS = prices.POINTS  # personal points (ALERT_POINTS secret / data/points.jso
 
 
 def fmt_km(k):
-    return f"{k:.1f}".replace(".", ",") if k < 10 else f"{k:.0f}"
+    return f"{k:.1f}" if k < 10 else f"{k:.0f}"
 
 
 def where(r):
-    """'📍 Zaandam, a 9,6 km' or '📍 Amsterdam, a 2,1 km del trabajo': distance to the nearest personal point only;
+    """'📍 Zaandam · 9.6 km' or '📍 Amsterdam · 2.1 km from work 💼': distance to the nearest personal point only;
     Marktplaats' distance to the search center when the listing has no coordinates."""
     city = r.get("city") or "?"
     k, p = prices.nearest(r)
     if p is None:
-        return f"📍 {city}, a {k} km"
-    return f"📍 {city}, a {fmt_km(k)} km{' del trabajo 💼' if p.get('work') else ''}"
+        return f"📍 {city} · {k} km"
+    return f"📍 {city} · {fmt_km(k)} km{' from work 💼' if p.get('work') else ''}"
 
 
 MON_BRANDS = re.compile(r"\b(dell|alienware|lg|samsung|asus|acer|aoc|benq|hp|iiyama|philips|msi|lenovo|viewsonic|"
@@ -255,10 +255,10 @@ def headline(f, kind, room):
     res = (f["res"] or "") + ("?" if f["res"] and f["guess"] else "")
     if kind == "tv":
         panel = "NanoCell" if f["nano"] else {"OLED": "OLED", "QLED": "QLED", "PLASMA": "Plasma"}.get(f["panel"], "")
-        bits = [(f["brand"] or "Tele", 0), (inch_s(f), 0), (res, 1), (panel, 2), ("Smart" if f["smart"] else "", 3)]
+        bits = [(f["brand"] or "TV", 0), (inch_s(f), 0), (res, 1), (panel, 2), ("Smart" if f["smart"] else "", 3)]
     else:
         bits = [(f["brand"] or "Monitor", 0), (inch_s(f), 0), ("ultrawide" if f["uw"] else res, 1),
-                ("USB‑C" if f["usbc_w"] else "", 2), ("curvo" if f["curved"] else "", 3)]
+                ("USB‑C" if f["usbc_w"] else "", 2), ("curved" if f["curved"] else "", 3)]
     bits = [(x, k) for x, k in bits if x]
     while len(" ".join(x for x, _ in bits)) > room and any(k for _, k in bits):
         worst = max(k for _, k in bits)
@@ -267,31 +267,31 @@ def headline(f, kind, room):
 
 
 def spec_line(f, kind):
-    """'📏 34" · 3440×1440 (UWQHD) · 100Hz · VA · USB‑C 65W · curvo' / '📏 55" · 4K · OLED · Smart · 2018'
+    """'📏 34" · 3440×1440 (UWQHD) · 100Hz · VA · USB‑C 65W · curved' / '📏 55" · 4K · OLED · Smart · 2018'
     (may wrap to a second line on the phone)."""
     q = "?" if f["guess"] else ""
     if kind == "tv":
-        bits = [inch_s(f), (f["res"] or "resolución ?") + (q if f["res"] else ""),
+        bits = [inch_s(f), (f["res"] or "res ?") + (q if f["res"] else ""),
                 "NanoCell" if f["nano"] else f["panel"] or "", "Smart" if f["smart"] else "",
                 f"{f['hz']}Hz" if f["hz"] and f["hz"] > 60 else "", str(f["year"] or "")]
     else:
         res = f["res"] or ""
-        bits = [inch_s(f), f"{RES_PX[res]} ({res}){q}" if res in RES_PX else res + q if res else "resolución ?",
+        bits = [inch_s(f), f"{RES_PX[res]} ({res}){q}" if res in RES_PX else res + q if res else "res ?",
                 f"{f['hz']}Hz" if f["hz"] else "", f["panel"] or "",
-                f"USB‑C {f['usbc_w']}W" if f["usbc_w"] else "", "curvo" if f["curved"] else "", str(f["year"] or "")]
+                f"USB‑C {f['usbc_w']}W" if f["usbc_w"] else "", "curved" if f["curved"] else "", str(f["year"] or "")]
     return "📏 " + " · ".join(x for x in bits if x)
 
 
 def price_line(r, kind):
-    """'💶 Vale ~€241 · nuevo ~€400 (−88%)', short enough for one phone line: the fair second-hand value, then the
+    """'💶 Recommended €241 · New €400 (−88%)', short enough for one phone line: the fair second-hand value, then the
     real new price (models.json / the AI / the new-today estimate) and how far the asking price is below it."""
     p = r.get("price")
     new = r.get("new_price") or prices.new_of(r, kind)
     f = prices.fair(r, kind, severity(r))
-    parts = [f"Vale ~€{f:.0f}"] if f else []
+    parts = [f"Recommended €{f:.0f}"] if f else []
     if new:
         d = round((1 - p / new) * 100) if p else None
-        parts.append(f"nuevo ~€{new:.0f}" + (f" (−{d}%)" if d and d > 0 else ""))
+        parts.append(f"New €{new:.0f}" + (f" (−{d}%)" if d and d > 0 else ""))
     return "💶 " + " · ".join(parts) if parts else ""
 
 
@@ -300,7 +300,7 @@ def bids(r):
     if not (r.get("n_bids") and r.get("top_bid")):
         return ""
     n = r["n_bids"]
-    return f"🔨 Ya hay {n} puja{'s' if n > 1 else ''}: la más alta €{r['top_bid']:.0f}"
+    return f"🔨 {n} bid{'s' if n > 1 else ''} already · highest €{r['top_bid']:.0f}"
 
 
 def describe(rule, r, tag=""):
@@ -317,7 +317,7 @@ def finish(r, tag, kind):
     sev = severity(r)
     f = facts(r, kind)
     p = r.get("price")
-    price = f"€{p:.0f}" if p else "gratis" if r.get("ptype") == "FREE" else "sin precio"
+    price = f"€{p:.0f}" if p else "free" if r.get("ptype") == "FREE" else "no price"
     emoji = "📺" if kind == "tv" else "🖥️"
     head = f"{prices.tag(PRICE_REF, r, kind, sev) or 'P?'} · {price} · {emoji} "
     room = LINE - len(head) - (4 if sev else 0) - (2 if tag else 0)
@@ -326,14 +326,14 @@ def finish(r, tag, kind):
     if sev:
         quote = defect_note(r, LIGHT_RX if sev == "light" else None) or (r.get("ai") or {}).get("defects") or ""
         title += " · 🔴" if sev == "heavy" else " · 🟠"
-        dmg = ("🔴 Daño grave" if sev == "heavy" else "🟠 Daño leve") + (f": «{quote[:60]}{'…' if len(quote) > 60 else ''}»" if quote else "")
+        dmg = ("🔴 Heavy damage" if sev == "heavy" else "🟠 Light damage") + (f": «{quote[:60]}{'…' if len(quote) > 60 else ''}»" if quote else "")
     if tag:
         title += " ❓"
     a = ai.line(r)
     if tag and not r.get("ai"):
-        a = "❓ Falta un dato clave (resolución/tamaño) y no se pudo comprobar"
+        a = "❓ Size or resolution unknown and could not be checked"
     elif tag:
-        a = (a + "\n" if a else "") + "❓ La IA no lo confirma del todo: míralo"
+        a = (a + "\n" if a else "") + "❓ The AI is not fully sure: have a look"
     lines = [bids(r), spec_line(f, kind), dmg, price_line(r, kind), where(r), a]
     return title, "\n".join(x for x in lines if x)
 
@@ -706,7 +706,7 @@ def cmd_run(args):
         log(f"ALERT TV{' ' + tag if tag else ''} [{ru['name']}] {r['id']} €{r.get('price')} {r['title']!r} {r.get('city')} {r['url']}")
     hits_all = hits + tv_hits
     if len(hits_all) > shown:
-        notify.toast(f"🔔 +{len(hits_all) - shown} avisos más", "python -I alert.py log", "")
+        notify.toast(f"🔔 +{len(hits_all) - shown} more alerts", "python -I alert.py log", "")
     if hits_all:
         notify.sound()
     if cloud:
@@ -721,9 +721,9 @@ def cmd_run(args):
         d["tv_new"] = d.get("tv_new", 0) + len(tv_new)
         d["tv_alerts"] = d.get("tv_alerts", 0) + len(tv_hits)
         if t.hour >= cfg.get("heartbeat_hour", 21) and s.get("heartbeat") != day and cfg.get("heartbeat", True):
-            notify.ntfy(cfg.get("ntfy_topic"), "✅ Alertas de monitores y teles activas",
-                        f"Hoy: {d['checks']} revisiones · monitores: {d['new']} nuevos, {d['alerts']} alertas · "
-                        f"teles: {d['tv_new']} nuevas, {d['tv_alerts']} alertas · IA: {d.get('ai', 0)} consultas.", "", priority=2)
+            notify.ntfy(cfg.get("ntfy_topic"), "✅ Monitor and TV alerts running",
+                        f"Today: {d['checks']} checks · monitors: {d['new']} new, {d['alerts']} alerts · "
+                        f"TVs: {d['tv_new']} new, {d['tv_alerts']} alerts · AI: {d.get('ai', 0)} lookups.", "", priority=2)
             s["heartbeat"] = day
         summary(cfg, pool, new_rows, hits, s)
         summary_tv(cfg, tvs, tv_new, tv_hits)
@@ -826,14 +826,15 @@ def cmd_toast(args):
 
 def cmd_ping(args):
     cfg = conf()
-    ok = notify.ntfy(cfg.get("ntfy_topic"), "P97 (€75) 🖥️ Iiyama XUB3493WQSU-B1 · 🟠 LIGHT",
-                     "🟠 LIGHTLY DAMAGED: «2 dode pixels rechtsboven, verder perfect»\n"
-                     "🖥️ Ultrawide 34–35\" (con o sin USB‑C)\n34\" UWQHD 75Hz · −77% (nuevo ~€330) · vale ~€160 · Amsterdam 3,2 km\n"
-                     "(EJEMPLO de prueba, no es un anuncio real)", "https://www.marktplaats.nl")
-    ok = notify.ntfy(cfg.get("ntfy_topic_tv"), "P93 (€150) 📺 Philips 55PUS6753",
-                     "📺 4K Smart ≥55\"\n55\" 4K LED Smart 2018 · −64% (nuevo ~€411) · vale ~€177 · Amsterdam 1,6 km\n"
-                     "🔨 puja mínima €30 → ~€45 realista\n"
-                     "(EJEMPLO de prueba, no es un anuncio real)", "https://www.marktplaats.nl") and ok
+    ok = notify.ntfy(cfg.get("ntfy_topic"), "P97 · €75 · 🖥️ iiyama 34\" ultrawide · 🟠",
+                     "📏 34\" · 3440×1440 (UWQHD) · 75Hz · VA · USB‑C 65W\n"
+                     "🟠 Light damage: «2 dode pixels rechtsboven, verder perfect»\n"
+                     "💶 Recommended €160 · New €330 (−77%)\n📍 Amsterdam · 3.2 km\n"
+                     "(TEST sample, not a real listing)", "https://www.marktplaats.nl")
+    ok = notify.ntfy(cfg.get("ntfy_topic_tv"), "P93 · €80 · 📺 Philips 55\" 4K Smart",
+                     "📏 55\" · 4K · LED · Smart · 2018\n💶 Recommended €177 · New €411 (−81%)\n"
+                     "📍 Amsterdam · 1.6 km\n"
+                     "(TEST sample, not a real listing)", "https://www.marktplaats.nl") and ok
     print("phone push sent" if ok else "phone push FAILED (is NTFY_TOPIC set?)")
 
 
