@@ -233,12 +233,18 @@ def ai_spec(r, kind):
 
 
 def new_part(r, kind):
-    """' · −40% (~€160)': price vs the fair second-hand value (prices.fair: new-today equivalent × age × condition)."""
-    f, p = prices.fair(r, kind, severity(r)), prices.eff_price(r)
-    if not f or p is None:
-        return ""
-    d = round((1 - p / f) * 100)
-    return f" · −{d}% (~€{f:.0f})" if d > 0 else f" · +{-d}% (~€{f:.0f})"
+    """' · −88% (nuevo ~€800) · vale ~€92': asking price vs the real new price (models.json, the AI, or the
+    prices.py new-today estimate), then the fair second-hand value (prices.fair: new-today × age × condition)."""
+    p = r.get("ask") or r.get("price")
+    new = r.get("new_price") or prices.new_of(r, kind)
+    f = prices.fair(r, kind, severity(r))
+    out = ""
+    if new and p:
+        d = round((1 - p / new) * 100)
+        out += f" · −{d}% (nuevo ~€{new:.0f})" if d > 0 else f" · nuevo ~€{new:.0f}"
+    elif new:
+        out += f" · nuevo ~€{new:.0f}"
+    return out + (f" · vale ~€{f:.0f}" if f else "")
 
 
 def describe(rule, r, tag=""):
@@ -263,7 +269,8 @@ def describe_tv(rule, r, tag=""):
 def finish(name, body, r, tag, kind):
     """Title 'P98 (€80) name [· 🔴 HEAVY]' + damage line first, then the rule/spec lines, then the AI lines."""
     sev = severity(r)
-    price = f"~€{r['price']:.0f} puja" if r.get("ask") else f"€{r['price']:.0f}" if r.get("price") else \
+    p = r.get("ask") or r.get("price")  # the listing's own price; a lowball's realistic price goes in the 🔨 line
+    price = f"€{p:.0f}" if p else \
         "gratis" if r.get("ptype") == "FREE" else "sin precio"
     title = f"{prices.tag(PRICE_REF, r, kind, sev) or 'P?'} ({price}) {name}"
     if sev:
@@ -282,8 +289,13 @@ def finish(name, body, r, tag, kind):
 
 
 def bids(r):
-    s = f" · pide €{r['ask']:.0f}, puja mínima €{r['min_bid']:.0f}" if r.get("ask") else ""
-    return s + (f" · {r['n_bids']} pujas (máx €{r['top_bid']:.0f})" if r.get("n_bids") and r.get("top_bid") else "")
+    """Own line under the spec line: '🔨 puja mínima €30 → ~€45 realista · 2 pujas (máx €40)', or ''."""
+    parts = []
+    if r.get("ask"):
+        parts.append(f"puja mínima €{r['min_bid']:.0f} → ~€{r['price']:.0f} realista")
+    if r.get("n_bids") and r.get("top_bid"):
+        parts.append(f"{r['n_bids']} pujas (máx €{r['top_bid']:.0f})")
+    return "\n🔨 " + " · ".join(parts) if parts else ""
 
 
 def heavy_gate(cfg, r, kind):
@@ -774,10 +786,11 @@ def cmd_ping(args):
     cfg = conf()
     ok = notify.ntfy(cfg.get("ntfy_topic"), "P97 (€75) 🖥️ Iiyama XUB3493WQSU-B1 · 🟠 LIGHT",
                      "🟠 LIGHTLY DAMAGED: «2 dode pixels rechtsboven, verder perfect»\n"
-                     "🖥️ Ultrawide 34–35\" (con o sin USB‑C)\n34\" UWQHD 75Hz · −77% (~€330) · Amsterdam 3,2 km\n"
+                     "🖥️ Ultrawide 34–35\" (con o sin USB‑C)\n34\" UWQHD 75Hz · −77% (nuevo ~€330) · vale ~€160 · Amsterdam 3,2 km\n"
                      "(EJEMPLO de prueba, no es un anuncio real)", "https://www.marktplaats.nl")
-    ok = notify.ntfy(cfg.get("ntfy_topic_tv"), "P93 (€80) 📺 Philips 55PUS6753",
-                     "📺 Tele 4K ≥55\" barata\n55\" 4K LED Smart 2018 · −90% (~€800) · Amsterdam 1,6 km\n"
+    ok = notify.ntfy(cfg.get("ntfy_topic_tv"), "P93 (€150) 📺 Philips 55PUS6753",
+                     "📺 4K Smart ≥55\"\n55\" 4K LED Smart 2018 · −64% (nuevo ~€411) · vale ~€177 · Amsterdam 1,6 km\n"
+                     "🔨 puja mínima €30 → ~€45 realista\n"
                      "(EJEMPLO de prueba, no es un anuncio real)", "https://www.marktplaats.nl") and ok
     print("phone push sent" if ok else "phone push FAILED (is NTFY_TOPIC set?)")
 
